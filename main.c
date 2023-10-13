@@ -141,7 +141,7 @@ typedef struct Instr {
 
     I_LOADD, /* d(m) */
     I_LOADS, /* s(m) */
-    I_LOADl, /* l(m) */
+    I_LOADL, /* l(m) */
     I_LOADSW, I_LOADUW, /* I(mm) */
     I_LOADSH, I_LOADUH, /* I(mm) */
     I_LOADSB, I_LOADUB, /* I(mm) */
