@@ -87,8 +87,10 @@ typedef struct AgType {
   ArrType *body;
 } AgType;
 
-AgType ag_type_pool[1024]; /* 24 KB */
-int next_ag_id;
+static AgType ag_type_pool[1024]; /* 24 KB */
+static int next_ag_id;
+
+void AgType_cleanup(void);
 
 typedef struct Linkage {
   uint8_t is_export;
@@ -97,6 +99,8 @@ typedef struct Linkage {
   const char *sec_name;
   const char *sec_flags;
 } Linkage;
+
+void Linkage_delete(Linkage *);
 
 typedef struct DataItem {
   enum {
@@ -134,8 +138,10 @@ typedef struct DataDef {
   DataDefItem *items;
 } DataDef;
 
-DataDef data_def_pool[1024]; /* 48 KB */
-int next_data_def_id = 1;
+static DataDef data_def_pool[1024]; /* 48 KB */
+static int next_data_def_id = 1;
+
+void DataDef_cleanup(void);
 
 typedef struct Instr {
   enum {
@@ -233,7 +239,7 @@ typedef struct Instr {
     struct {
       Value f;
       uint16_t has_env_arg:1;
-      uint16_t args_len:15; /* includes varargs */
+      uint16_t args_len:15; /* includes env and varargs */
       uint16_t has_vararg:1;
       uint16_t varargs_len:15;
       Value *args;
@@ -249,37 +255,44 @@ typedef struct Instr {
   uint32_t next_id; /* idx into instr_pool; 0 means null */
 } Instr;
 
-Instr instr_pool[1024]; /* 72 KB */
-int next_instr_pool_id = 1;
+static Instr instr_pool[1024]; /* 72 KB */
+static int next_instr_id = 1;
+
+void Instr_cleanup(void);
 
 typedef struct Block Block;
 struct Block {
   Ident ident;
-  Instr *instr;
-  Block *next;
+  uint32_t instr_id;
+  uint16_t next_id; /* idx into blk_pool; 0 means null */
 };
+
+static Block blk_pool[1024]; /* 12 KB */
+static int next_blk_id = 1;
 
 typedef struct FuncDef {
   Linkage linkage;
   Type ret_t;
-  uint16_t params_len; /* only `params` */
+  uint16_t params_len;
   uint16_t params_cap;
   Ident ident;
-  Ident env_param; /* optional */
   struct {
     Type t;
     Ident ident;
   } *params;
-  uint8_t is_varargs;
+  uint8_t is_varargs:1;
+  uint8_t has_env_arg:1;
+  uint16_t blk_id;
   uint16_t next_id; /* idx into func_def_pool; 0 means null */
-  Block *blk;
 } FuncDef;
 
-FuncDef func_def_pool[1024]; /* 64 KB */
-int next_func_def_id = 1;
+static FuncDef func_def_pool[1024]; /* 56 KB */
+static int next_func_def_id = 1;
+
+void FuncDef_cleanup(void);
 
 /* djb2 hashing */
-unsigned long hash(const char *s) {
+static unsigned long hash(const char *s) {
   char c;
   unsigned long hash = 5381;
   while ((c = *s++) != 0) {
@@ -302,7 +315,7 @@ Ident Ident_from_str(const char *s) {
       node = node->next;
     }
     if (!node) {
-      node = malloc(sizeof(*node));
+      node = calloc(1, sizeof(*node));
       node->s = strdup(s);
       node->next = 0;
       prev->next = node;
@@ -311,6 +324,7 @@ Ident Ident_from_str(const char *s) {
   return ident;
 }
 
+/* returns null if input is 0 */
 const char *Ident_to_str(Ident s) {
   HashNode *node;
   uint16_t rem_steps;
@@ -341,12 +355,87 @@ void Ident_cleanup(void) {
   }
 }
 
+void AgType_cleanup(void) {
+  int i;
+  for (i = 0; i < next_ag_id; ++i) {
+    assert(ag_type_pool[i].body);
+    free(ag_type_pool[i].body);
+  }
+}
+
+void Linkage_delete(Linkage *p) {
+  assert(p->sec_name);
+  assert(p->sec_flags);
+  free((void *) p->sec_name);
+  free((void *) p->sec_flags);
+}
+
+void DataDef_cleanup(void) {
+  int i, j, k;
+  DataDef *d;
+  DataItem *di;
+  for (i = 1; i < next_data_def_id; ++i) {
+    d = &data_def_pool[i];
+    assert(d->items);
+    for (j = 0; j < d->items_len; ++j) {
+      assert(d->items[j].items);
+      for (k = 0; k < d->items[j].items_len; ++k) {
+	di = &d->items[j].items[k];
+	if (di->t == DI_STR) {
+	  assert(di->u.str);
+	  free((void *) di->u.str);
+	}
+      }
+      free(d->items[j].items);
+    }
+    free(d->items);
+    Linkage_delete(&d->linkage);
+  }
+}
+
+void Instr_cleanup(void) {
+  int i;
+  for (i = 1; i < next_instr_id; ++i) {
+    if (instr_pool[i].t == I_CALL) {
+      if (instr_pool[i].u.call.args) {
+	free(instr_pool[i].u.call.args);
+      }
+    } else if (instr_pool[i].t == I_PHI) {
+      if (instr_pool[i].u.phi.args) {
+	free(instr_pool[i].u.phi.args);
+      }
+    }
+  }
+}
+
+void FuncDef_cleanup(void) {
+  int i;
+  FuncDef *p;
+  for (i = 1; i < next_func_def_id; ++i) {
+    p = &func_def_pool[i];
+    Linkage_delete(&p->linkage);
+    if (p->params) {
+      free(p->params);
+    }
+  }
+}
+
 int main(void) {
   assert(sizeof(Type) == 4);
   assert(sizeof(ArrType) == 8);
   assert(sizeof(AgType) == 24);
   assert(sizeof(DataDef) == 48);
-  assert(sizeof(FuncDef) == 64);
+  assert(sizeof(Block) == 12);
+  assert(sizeof(FuncDef) == 56);
   assert(sizeof(Instr) == 72);
+
+  (void)blk_pool;
+  (void)next_blk_id;
+
+  Ident_cleanup();
+  AgType_cleanup();
+  DataDef_cleanup();
+  Instr_cleanup();
+  FuncDef_cleanup();
   return 0;
 }
