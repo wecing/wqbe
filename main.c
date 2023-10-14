@@ -100,8 +100,6 @@ typedef struct Linkage {
   const char *sec_flags;
 } Linkage;
 
-void Linkage_delete(Linkage *);
-
 typedef struct DataItem {
   enum {
     DI_UNKNOWN,
@@ -363,13 +361,6 @@ void AgType_cleanup(void) {
   }
 }
 
-void Linkage_delete(Linkage *p) {
-  assert(p->sec_name);
-  assert(p->sec_flags);
-  free((void *) p->sec_name);
-  free((void *) p->sec_flags);
-}
-
 void DataDef_cleanup(void) {
   int i, j, k;
   DataDef *d;
@@ -389,7 +380,11 @@ void DataDef_cleanup(void) {
       free(d->items[j].items);
     }
     free(d->items);
-    Linkage_delete(&d->linkage);
+
+    if(d->linkage.sec_name)
+      free((void *) d->linkage.sec_name);
+    if(d->linkage.sec_flags)
+      free((void *) d->linkage.sec_flags);
   }
 }
 
@@ -397,13 +392,11 @@ void Instr_cleanup(void) {
   int i;
   for (i = 1; i < next_instr_id; ++i) {
     if (instr_pool[i].t == I_CALL) {
-      if (instr_pool[i].u.call.args) {
+      if (instr_pool[i].u.call.args)
 	free(instr_pool[i].u.call.args);
-      }
     } else if (instr_pool[i].t == I_PHI) {
-      if (instr_pool[i].u.phi.args) {
+      if (instr_pool[i].u.phi.args)
 	free(instr_pool[i].u.phi.args);
-      }
     }
   }
 }
@@ -413,10 +406,12 @@ void FuncDef_cleanup(void) {
   FuncDef *p;
   for (i = 1; i < next_func_def_id; ++i) {
     p = &func_def_pool[i];
-    Linkage_delete(&p->linkage);
-    if (p->params) {
+    if(p->linkage.sec_name)
+      free((void *) p->linkage.sec_name);
+    if(p->linkage.sec_flags)
+      free((void *) p->linkage.sec_flags);
+    if (p->params)
       free(p->params);
-    }
   }
 }
 
