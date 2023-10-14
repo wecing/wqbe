@@ -1,6 +1,25 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct Ident {
+  uint16_t slot; /* hash table slot */
+  uint16_t idx; /* idx within slot */
+} Ident;
+
+typedef struct HashNode HashNode;
+struct HashNode {
+  const char *s;
+  HashNode *next;
+};
+
+static HashNode *ident_tbl[1024]; /* hash table */
+
+Ident Ident_from_str(const char *);
+const char *Ident_to_str(Ident);
+void Ident_cleanup(void);
 
 typedef struct Value {
   enum {
@@ -19,9 +38,9 @@ typedef struct Value {
     uint64_t u64;
     float s;
     double d;
-    const char *ident;
+    Ident ident;
     /* DYNCONST := CONST | 'thread' $IDENT */
-    const char *thread_ident;
+    Ident thread_ident;
 
     uint32_t instr_id; /* idx into instr_pool; 0 means null */
   } u;
@@ -64,7 +83,7 @@ typedef struct AgType {
   uint32_t body_len:14; /* max number of fields 2^14-1 == 16383 */
   uint32_t body_cap:14;
   uint32_t size;
-  const char *ident;
+  Ident ident;
   ArrType *body;
 } AgType;
 
@@ -88,7 +107,7 @@ typedef struct DataItem {
   } t;
   union {
     struct {
-      const char *ident;
+      Ident ident;
       int32_t offset;
     } sym_off;
     const char *str;
@@ -107,7 +126,7 @@ typedef struct DataDefItem {
 
 typedef struct DataDef {
   Linkage linkage;
-  const char *ident;
+  Ident ident;
   uint8_t log_align;
   uint16_t items_len;
   uint16_t items_cap;
@@ -205,11 +224,11 @@ typedef struct Instr {
   };
   uint8_t t;
   Type ret_t;
-  const char *ident; /* optional */
+  Ident ident; /* optional */
   union {
     union {
       Value v;
-      const char *ident;
+      Ident ident;
     } arg[3];
     struct {
       Value f;
@@ -222,7 +241,7 @@ typedef struct Instr {
     struct {
       uint16_t args_len;
       struct {
-	const char *ident;
+	Ident ident;
 	Value v;
       } *args;
     } phi;
@@ -235,7 +254,7 @@ int next_instr_pool_id = 1;
 
 typedef struct Block Block;
 struct Block {
-  const char *ident;
+  Ident ident;
   Instr *instr;
   Block *next;
 };
@@ -245,27 +264,89 @@ typedef struct FuncDef {
   Type ret_t;
   uint16_t params_len; /* only `params` */
   uint16_t params_cap;
-  const char *ident;
-  const char *env_param; /* optional */
+  Ident ident;
+  Ident env_param; /* optional */
   struct {
     Type t;
-    const char *ident;
+    Ident ident;
   } *params;
   uint8_t is_varargs;
   uint16_t next_id; /* idx into func_def_pool; 0 means null */
   Block *blk;
 } FuncDef;
 
-FuncDef func_def_pool[1024]; /* 72 KB */
+FuncDef func_def_pool[1024]; /* 64 KB */
 int next_func_def_id = 1;
 
+/* djb2 hashing */
+unsigned long hash(const char *s) {
+  char c;
+  unsigned long hash = 5381;
+  while ((c = *s++) != 0) {
+    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+  }
+  return hash;
+}
+
+Ident Ident_from_str(const char *s) {
+  const int entries_cnt = sizeof(ident_tbl) / sizeof(ident_tbl[0]);
+  Ident ident = {.slot = 0, .idx = 0};
+  HashNode *node = 0, *prev = 0;
+
+  if (s) {
+    ident.slot = (hash(s) % (entries_cnt - 1)) + 1;
+    node = ident_tbl[ident.slot];
+    while (node && strcmp(s, node->s) != 0) {
+      ident.idx++;
+      prev = node;
+      node = node->next;
+    }
+    if (!node) {
+      node = malloc(sizeof(*node));
+      node->s = strdup(s);
+      node->next = 0;
+      prev->next = node;
+    }
+  }
+  return ident;
+}
+
+const char *Ident_to_str(Ident s) {
+  HashNode *node;
+  uint16_t rem_steps;
+
+  node = ident_tbl[s.slot];
+  rem_steps = s.idx;
+  assert(node);
+  while (rem_steps--) {
+    node = node->next;
+    assert(node);
+  }
+  return node->s;
+}
+
+void Ident_cleanup(void) {
+  const int entries_cnt = sizeof(ident_tbl) / sizeof(ident_tbl[0]);
+  HashNode *node, *t;
+  int i;
+
+  for (i = 1; i < entries_cnt; ++i) {
+    node = ident_tbl[i];
+    while (node) {
+      t = node;
+      node = node->next;
+      free((void *) t->s);
+      free(t);
+    }
+  }
+}
+
 int main(void) {
-  /* TODO: intern ident and update pool size comments */
   assert(sizeof(Type) == 4);
   assert(sizeof(ArrType) == 8);
   assert(sizeof(AgType) == 24);
   assert(sizeof(DataDef) == 48);
-  assert(sizeof(FuncDef) == 72);
+  assert(sizeof(FuncDef) == 64);
   assert(sizeof(Instr) == 72);
   return 0;
 }
