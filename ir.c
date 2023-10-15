@@ -6,7 +6,7 @@
 
 typedef struct HashNode HashNode;
 struct HashNode {
-  const char *s;
+  char *s;
   HashNode *next;
 };
 
@@ -85,7 +85,7 @@ static void Ident_cleanup(void) {
     while (node) {
       t = node;
       node = node->next;
-      free((void *) t->s);
+      free(t->s);
       free(t);
     }
   }
@@ -112,7 +112,7 @@ static void DataDef_cleanup(void) {
         di = &d->items[j].items[k];
         if (di->t == DI_STR) {
           assert(di->u.str);
-          free((void *) di->u.str);
+          free(di->u.str);
         }
       }
       free(d->items[j].items);
@@ -120,9 +120,9 @@ static void DataDef_cleanup(void) {
     free(d->items);
 
     if(d->linkage.sec_name)
-      free((void *) d->linkage.sec_name);
+      free(d->linkage.sec_name);
     if(d->linkage.sec_flags)
-      free((void *) d->linkage.sec_flags);
+      free(d->linkage.sec_flags);
   }
 }
 
@@ -145,9 +145,9 @@ static void FuncDef_cleanup(void) {
   for (i = 1; i < next_func_def_id; ++i) {
     p = &func_def_pool[i];
     if(p->linkage.sec_name)
-      free((void *) p->linkage.sec_name);
+      free(p->linkage.sec_name);
     if(p->linkage.sec_flags)
-      free((void *) p->linkage.sec_flags);
+      free(p->linkage.sec_flags);
     if (p->params)
       free(p->params);
   }

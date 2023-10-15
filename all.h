@@ -75,8 +75,8 @@ typedef struct Linkage {
   uint8_t is_export;
   uint8_t is_thread;
   uint8_t is_section;
-  const char *sec_name;
-  const char *sec_flags;
+  char *sec_name;
+  char *sec_flags;
 } Linkage;
 
 typedef struct DataItem {
@@ -91,7 +91,7 @@ typedef struct DataItem {
       Ident ident;
       int32_t offset;
     } sym_off;
-    const char *str;
+    char *str;
     Value cst;
   } u;
 } DataItem;
