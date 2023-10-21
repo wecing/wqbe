@@ -7,7 +7,7 @@
 static FILE *input;
 
 static int _getc(void) {
-#if 1
+#if 0
   int c = fgetc(input);
   if (c == EOF) {
     printf(">> EOF\n");
@@ -227,7 +227,7 @@ static void expect_typedef(void) {
       c = _getc();
       if (c != EOF) _ungetc(c);
       if (c == '}') break;
-      
+
       skip_space();
       tp = expect_type();
       check(Type_is_subty(tp), "SUBTY expected");

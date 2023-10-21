@@ -261,6 +261,7 @@ int Ident_eq(Ident, Ident);
 int Type_is_subty(Type);
 Type AgType_lookup_or_alloc(Ident);
 AgType *AgType_get(Type);
+void ir_dump_typedef(void);
 void ir_cleanup(void);
 
 /* parse.c */

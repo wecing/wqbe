@@ -110,6 +110,43 @@ AgType *AgType_get(Type t) {
   return &ag_type_pool[t.ag_id];
 }
 
+static void dump_type(Type t) {
+  switch (t.t) {
+  case TP_W: printf("w"); break;
+  case TP_L: printf("l"); break;
+  case TP_S: printf("s"); break;
+  case TP_D: printf("d"); break;
+  case TP_B: printf("b"); break;
+  case TP_H: printf("h"); break;
+  case TP_SB: printf("sb"); break;
+  case TP_SH: printf("sh"); break;
+  case TP_UB: printf("ub"); break;
+  case TP_UH: printf("uh"); break;
+  case TP_AG:
+    printf("%s", Ident_to_str(AgType_get(t)->ident));
+    break;
+  case TP_NONE:
+    break;
+  default:
+    fail("unrecognized TYPE kind: %d", t.t);
+  }
+}
+
+void ir_dump_typedef(void) {
+  int i, j;
+  AgType ag;
+  for (i = 0; i < next_ag_id; ++i) {
+    ag = ag_type_pool[i];
+    printf("type %s = align %d {", Ident_to_str(ag.ident), 1 << ag.log_align);
+    for (j = 0; j < ag.body_len; ++j) {
+      printf(" ");
+      dump_type(ag.body[j].t);
+      printf(" %d%c", ag.body[j].count, j == ag.body_len - 1 ? ' ' : ',');
+    }
+    printf("}\n");
+  }
+}
+
 static void Ident_cleanup(void) {
   const int entries_cnt = countof(ident_tbl);
   HashNode *node, *t;

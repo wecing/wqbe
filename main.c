@@ -26,6 +26,8 @@ int main(int argc, char *argv[]) {
     fclose(f);
   }
 
+  ir_dump_typedef();
+
   ir_cleanup();
   return 0;
 }
