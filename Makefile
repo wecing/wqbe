@@ -2,7 +2,7 @@
 .SUFFIXES:
 .SUFFIXES: .c .o
 
-OBJ = main.o ir.o
+OBJ = main.o ir.o parse.o util.o
 
 SRCALL = $(OBJ:.o=.c)
 

@@ -10,7 +10,7 @@ struct HashNode {
   HashNode *next;
 };
 
-static HashNode *ident_tbl[1024]; /* hash table */
+static HashNode *ident_tbl[1024]; /* 16 KB; hash table */
 
 static AgType ag_type_pool[1024]; /* 24 KB */
 static int next_ag_id = 0;
@@ -38,23 +38,24 @@ static unsigned long hash(const char *s) {
 }
 
 Ident Ident_from_str(const char *s) {
-  const int entries_cnt = sizeof(ident_tbl) / sizeof(ident_tbl[0]);
+  const int entries_cnt = countof(ident_tbl);
   Ident ident = {.slot = 0, .idx = 0};
-  HashNode *node = 0, *prev = 0;
+  HashNode *node = 0, **node_p = 0;
 
   if (s) {
     ident.slot = (hash(s) % (entries_cnt - 1)) + 1;
-    node = ident_tbl[ident.slot];
-    while (node && strcmp(s, node->s) != 0) {
+    node_p = &ident_tbl[ident.slot];
+    node = *node_p;
+    while (node && node->s && strcmp(s, node->s) != 0) {
       ident.idx++;
-      prev = node;
-      node = node->next;
+      node_p = &node->next;
+      node = *node_p;
     }
     if (!node) {
       node = calloc(1, sizeof(*node));
       node->s = strdup(s);
       node->next = 0;
-      prev->next = node;
+      *node_p = node;
     }
   }
   return ident;
@@ -75,8 +76,42 @@ const char *Ident_to_str(Ident s) {
   return node->s;
 }
 
+int Ident_eq(Ident x, Ident y) { return x.slot == y.slot && x.idx == y.idx; }
+
+int Type_is_subty(Type t) {
+  switch (t.t) {
+  case TP_W: case TP_L: case TP_S: case TP_D:
+  case TP_B: case TP_H:
+  case TP_AG:
+    return 1;
+  }
+  return 0;
+}
+
+Type AgType_lookup_or_alloc(Ident ident) {
+  int i;
+  Type t = {0};
+  t.t = TP_AG;
+  for (i = 0; i < next_ag_id; ++i) {
+    if (Ident_eq(ag_type_pool[i].ident, ident)) {
+      t.ag_id = i;
+      return t;
+    }
+  }
+
+  assert((uint64_t) next_ag_id < countof(ag_type_pool) - 1);
+  ag_type_pool[next_ag_id].ident = ident;
+  t.ag_id = next_ag_id++;
+  return t;
+}
+
+AgType *AgType_get(Type t) {
+  assert(t.t == TP_AG);
+  return &ag_type_pool[t.ag_id];
+}
+
 static void Ident_cleanup(void) {
-  const int entries_cnt = sizeof(ident_tbl) / sizeof(ident_tbl[0]);
+  const int entries_cnt = countof(ident_tbl);
   HashNode *node, *t;
   int i;
 

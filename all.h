@@ -1,4 +1,8 @@
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define countof(x) (sizeof(x) / sizeof((x)[0]))
 
 typedef struct Ident {
   uint16_t slot; /* hash table slot */
@@ -52,7 +56,7 @@ typedef struct Type {
     /* where type is optional, e.g. func return type is [ABITY] */
     TP_NONE
   };
-  uint16_t t:4;
+  uint32_t t:4;
   uint32_t ag_id:28;
 } Type;
 
@@ -253,4 +257,15 @@ typedef struct FuncDef {
 /* ir.c */
 Ident Ident_from_str(const char *);
 const char *Ident_to_str(Ident);
+int Ident_eq(Ident, Ident);
+int Type_is_subty(Type);
+Type AgType_lookup_or_alloc(Ident);
+AgType *AgType_get(Type);
 void ir_cleanup(void);
+
+/* parse.c */
+void parse(FILE *);
+
+/* util.c */
+void check(int cond, const char *, ...); /* like assert(), but always enabled */
+void fail(const char *, ...);
