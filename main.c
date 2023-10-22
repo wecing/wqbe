@@ -7,7 +7,7 @@ int main(int argc, char *argv[]) {
 
   assert(sizeof(Type) == 4);
   assert(sizeof(ArrType) == 8);
-  assert(sizeof(AgType) == 24);
+  assert(sizeof(AgType) == 16);
   assert(sizeof(DataDef) == 48);
   assert(sizeof(Block) == 12);
   assert(sizeof(FuncDef) == 56);

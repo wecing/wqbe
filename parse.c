@@ -50,9 +50,11 @@ static void skip_space_nl(void) {
   _ungetc(c);
 }
 
-static void expect_char(const char x) {
-  char c = _getc();
-  check(c == x, "char '%c' expected, got '%c'", x, c);
+static void expect_char(const char ex) {
+  int c = _getc();
+  if (c == ex) return;
+  if (c == EOF) fail("char '%c' expected, got EOF", ex);
+  fail("char '%c' expected, got '%c'", ex, c);
 }
 
 static uint64_t expect_number(void) {
@@ -166,6 +168,55 @@ static Type expect_type(void) {
 }
 
 /*
+ * expects '{' ( SUBTY [NUMBER] ), '}'
+ *
+ * the '{' will be omitted if expect_lbrace == 0.
+ */
+static ArrType *expect_struct_body(int expect_lbrace) {
+  int c;
+  ArrType *sb;
+  int sb_len = 0, sb_cap = 4;
+  sb = malloc(sizeof(sb[0]) * sb_cap);
+
+  if (expect_lbrace) expect_char('{');
+  c = ',';
+  while (c != '}') {
+    skip_space();
+    c = _getc();
+    if (c != EOF) _ungetc(c);
+    if (c == '}') {
+      c = _getc();
+      break; /* redundant comma ',}' or empty body '{}' */
+    }
+
+    if (sb_len == sb_cap - 1) {
+      sb_cap += 4;
+      sb = realloc(sb, sizeof(sb[0]) * sb_cap);
+    }
+
+    sb[sb_len].t = expect_type();
+    sb[sb_len].count = 1;
+    check(Type_is_subty(sb[sb_len].t), "SUBTY expected");
+    skip_space();
+    c = _getc();
+    if (c != EOF) _ungetc(c);
+    if (isdigit(c)) {
+      sb[sb_len].count = expect_number();
+    }
+    skip_space();
+    c = _getc();
+    check(c == ',' || c == '}', "expected ',' or '}'");
+
+    sb_len++;
+  }
+
+  sb[sb_len].t.t = TP_UNKNOWN;
+  sb[sb_len].t.ag_id = 0;
+  sb[sb_len].count = 0;
+  return sb;
+}
+
+/*
  * TYPEDEF :=
  *     # Regular type
  *     'type' :IDENT '=' ['align' NUMBER]
@@ -174,14 +225,18 @@ static Type expect_type(void) {
  *     '}'
  *   | # Opaque type
  *     'type' :IDENT '=' 'align' NUMBER '{' NUMBER '}'
- *
- * TODO: union
+ *   | # Union type (not documented)
+ *     'type' :IDENT '=' ['align' NUMBER]
+ *     '{'
+ *         ( '{'
+ *             ( SUBTY [NUMBER] ),
+ *         '}' )+
+ *     '}'
  */
 static void expect_typedef(void) {
   uint8_t has_align = 0;
   int c;
   AgType *ag;
-  Type tp;
   expect_keyword("type");
   skip_space();
   ag = AgType_get(AgType_lookup_or_alloc(expect_ident()));
@@ -212,49 +267,21 @@ static void expect_typedef(void) {
   if (isdigit(c)) {
     _ungetc(c);
     check(has_align, "opaque type must have explicit align");
+    ag->is_opaque = 1;
     ag->size = expect_number();
+    skip_space();
+    expect_char('}');
+  } else if (c == '{') {
+    ag->is_union = 1;
+    fail("union not supported");
+    /* TODO: parse union */
+    skip_space();
+    expect_char('}');
   } else {
     check(c != EOF, "incomplete TYPE");
     _ungetc(c);
-    ag->has_body = 1;
-    ag->body_len = 0;
-    ag->body_cap = 4;
-    ag->body = calloc(ag->body_cap, sizeof(ag->body[0]));
-    c = ','; /* pretend there is a prefix ',' */
-    while (c == ',') {
-      /* handle ', }' (redundant comma) */
-      skip_space();
-      c = _getc();
-      if (c != EOF) _ungetc(c);
-      if (c == '}') break;
-
-      skip_space();
-      tp = expect_type();
-      check(Type_is_subty(tp), "SUBTY expected");
-      ag->body[ag->body_len].t = tp;
-      ag->body[ag->body_len].count = 1;
-      skip_space();
-      c = _getc();
-      if (c != EOF) _ungetc(c);
-      if (isdigit(c)) {
-        ag->body[ag->body_len].count = expect_number();
-      }
-      skip_space();
-      c = _getc(); /* either ',' (continue) or '}' (break) */
-
-      ag->body_len++;
-      assert(ag->body_len > 0);
-      if (ag->body_len == ag->body_cap) {
-        ag->body_cap *= 2;
-        assert(ag->body_len < ag->body_cap);
-        ag->body = realloc(ag->body, sizeof(ag->body[0]) * ag->body_cap);
-      }
-    }
-    if (c != EOF) _ungetc(c); /* unget '}' */
+    ag->u.sb = expect_struct_body(/*expect_lbrace=*/0);
   }
-
-  skip_space();
-  expect_char('}');
 }
 
 /*
@@ -329,7 +356,7 @@ void parse(FILE *_input) {
     linkage = expect_linkage();
     skip_space();
 #endif
-    /* TODO */
+    /* TODO: funcdef, datadef */
   }
 
   /* TODO: fix AgType size and log_align */

@@ -67,12 +67,14 @@ typedef struct ArrType {
 
 typedef struct AgType {
   uint32_t log_align:3; /* max align 1<<7 == 128 */
-  uint32_t has_body:1;
-  uint32_t body_len:14; /* max number of fields 2^14-1 == 16383 */
-  uint32_t body_cap:14;
-  uint32_t size;
+  uint32_t is_opaque:1;
+  uint32_t is_union:1;
+  uint32_t size:27;
   Ident ident;
-  ArrType *body;
+  union {
+    ArrType *sb; /* struct body; terminated with TP_UNKNOWN */
+    ArrType **ub; /* union body; terminated with NULL + TP_UNKNOWN */
+  } u;
 } AgType;
 
 typedef struct Linkage {

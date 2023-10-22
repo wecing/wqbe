@@ -12,7 +12,7 @@ struct HashNode {
 
 static HashNode *ident_tbl[1024]; /* 16 KB; hash table */
 
-static AgType ag_type_pool[1024]; /* 24 KB */
+static AgType ag_type_pool[1024]; /* 16 KB */
 static int next_ag_id = 0;
 
 static DataDef data_def_pool[1024]; /* 48 KB */
@@ -132,18 +132,32 @@ static void dump_type(Type t) {
   }
 }
 
+static void dump_sb(ArrType *sb) {
+  printf("{");
+  while (sb->t.t != TP_UNKNOWN) {
+    printf(" ");
+    dump_type(sb->t);
+    printf(" %d%c", sb->count, sb[1].t.t == TP_UNKNOWN ? ' ' : ',');
+    sb++;
+  }
+  printf("}");
+}
+
 void ir_dump_typedef(void) {
-  int i, j;
+  int i;
   AgType ag;
   for (i = 0; i < next_ag_id; ++i) {
     ag = ag_type_pool[i];
-    printf("type %s = align %d {", Ident_to_str(ag.ident), 1 << ag.log_align);
-    for (j = 0; j < ag.body_len; ++j) {
-      printf(" ");
-      dump_type(ag.body[j].t);
-      printf(" %d%c", ag.body[j].count, j == ag.body_len - 1 ? ' ' : ',');
+    printf("type %s = align %d ", Ident_to_str(ag.ident), 1 << ag.log_align);
+    if (ag.is_opaque) {
+      printf("{ %d }", ag.size);
+    } else if (ag.is_union) {
+      fail("union dump not implemented");
+      /* TODO: dump union */
+    } else {
+      dump_sb(ag.u.sb);
     }
-    printf("}\n");
+    printf("\n");
   }
 }
 
@@ -165,9 +179,19 @@ static void Ident_cleanup(void) {
 
 static void AgType_cleanup(void) {
   int i;
+  ArrType **ub;
   for (i = 0; i < next_ag_id; ++i) {
-    assert(ag_type_pool[i].body);
-    free(ag_type_pool[i].body);
+    if (ag_type_pool[i].is_opaque) {
+      continue;
+    } else if (ag_type_pool[i].is_union) {
+      ub = ag_type_pool[i].u.ub;
+      while (*ub) {
+        free(*ub++);
+      }
+      free(ag_type_pool[i].u.ub);
+    } else {
+      free(ag_type_pool[i].u.sb);
+    }
   }
 }
 
@@ -226,7 +250,7 @@ static void FuncDef_cleanup(void) {
 }
 
 void ir_cleanup(void) {
-  /* TODO: remove */
+  /* TODO: parse blocks and remove */
   (void)blk_pool;
   (void)next_blk_id;
 
