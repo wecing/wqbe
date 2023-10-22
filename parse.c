@@ -27,6 +27,12 @@ static void _ungetc(int c) {
   ungetc(c, input);
 }
 
+static int _peekc(void) {
+  int c = fgetc(input);
+  if (c != EOF) ungetc(c, input);
+  return c;
+}
+
 static void skip_space(void) {
   int c;
   do { c = _getc(); } while (isspace(c) && c != '\n');
@@ -161,9 +167,8 @@ static Type expect_type(void) {
    * - 's_' FP
    * - 'd_' FP
    */
-  c = _getc();
+  c = _peekc();
   check(!isalnum(c) && c != '_', "TYPE expected");
-  if (c != EOF) _ungetc(c);
   return t;
 }
 
@@ -182,8 +187,7 @@ static ArrType *expect_struct_body(int expect_lbrace) {
   c = ',';
   while (c != '}') {
     skip_space();
-    c = _getc();
-    if (c != EOF) _ungetc(c);
+    c = _peekc();
     if (c == '}') {
       c = _getc();
       break; /* redundant comma ',}' or empty body '{}' */
@@ -198,9 +202,7 @@ static ArrType *expect_struct_body(int expect_lbrace) {
     sb[sb_len].count = 1;
     check(Type_is_subty(sb[sb_len].t), "SUBTY expected");
     skip_space();
-    c = _getc();
-    if (c != EOF) _ungetc(c);
-    if (isdigit(c)) {
+    if (isdigit(_peekc())) {
       sb[sb_len].count = expect_number();
     }
     skip_space();
@@ -243,9 +245,7 @@ static void expect_typedef(void) {
   skip_space();
   expect_char('=');
   skip_space();
-  c = _getc();
-  if (c != EOF) _ungetc(c);
-  if (c == 'a') {
+  if (_peekc() == 'a') {
     expect_keyword("align");
     has_align = 1;
     switch (expect_number()) {
@@ -263,9 +263,8 @@ static void expect_typedef(void) {
   expect_char('{');
 
   skip_space();
-  c = _getc();
+  c = _peekc();
   if (isdigit(c)) {
-    _ungetc(c);
     check(has_align, "opaque type must have explicit align");
     ag->is_opaque = 1;
     ag->size = expect_number();
@@ -279,7 +278,6 @@ static void expect_typedef(void) {
     expect_char('}');
   } else {
     check(c != EOF, "incomplete TYPE");
-    _ungetc(c);
     ag->u.sb = expect_struct_body(/*expect_lbrace=*/0);
   }
 }
@@ -294,12 +292,10 @@ static void expect_typedef(void) {
  * This function parses LINKAGE* (zero or more LINKAGE).
  */
 static Linkage expect_linkage(void) {
-  int c;
   Linkage r = {0};
 
  TAIL_CALL:
-  c = _getc();
-  switch (c) {
+  switch (_peekc()) {
   case EOF: return r;
   case 'e':
     expect_keyword("export");
@@ -320,39 +316,32 @@ static Linkage expect_linkage(void) {
     skip_space();
     r.sec_name = expect_str();
     skip_space();
-    c = _getc();
-    if (c == '"') {
-      _ungetc(c);
+    if (_peekc() == '"') {
       r.sec_flags = expect_str();
     }
     skip_space_nl();
     goto TAIL_CALL;
   default:
-    _ungetc(c);
     return r;
   }
 }
 
 void parse(FILE *_input) {
-  int c;
   Linkage linkage;
   input = _input;
 
  TAIL_CALL:
   skip_space_nl();
-  c = _getc();
-  switch (c) {
+  switch (_peekc()) {
   case EOF: break;
   case 't': /* 'type' */
-    _ungetc('t');
     expect_typedef();
     goto TAIL_CALL;
   default:
     (void)expect_linkage;
     (void)linkage;
-    fail("unexpected char '%c'", c);
+    fail("funcdef / datadef parsing not implemented");
 #if 0
-    _ungetc(c);
     linkage = expect_linkage();
     skip_space();
 #endif
