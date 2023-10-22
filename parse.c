@@ -239,6 +239,8 @@ static void expect_typedef(void) {
   uint8_t has_align = 0;
   int c;
   AgType *ag;
+  int ub_len;
+  int ub_cap;
   expect_keyword("type");
   skip_space();
   ag = AgType_get(AgType_lookup_or_alloc(expect_ident()));
@@ -272,10 +274,25 @@ static void expect_typedef(void) {
     expect_char('}');
   } else if (c == '{') {
     ag->is_union = 1;
-    fail("union not supported");
-    /* TODO: parse union */
+    ub_len = 0;
+    ub_cap = 4;
+    ag->u.ub = malloc(sizeof(ArrType *) * ub_cap);
+    while (c == '{') {
+      ag->u.ub[ub_len++] = expect_struct_body(/*expect_lbrace=*/1);
+      if (ub_len == ub_cap - 1) {
+        ub_cap *= 2;
+        assert(ub_len < ub_cap - 1);
+        ag->u.ub = realloc(ag->u.ub, sizeof(ArrType *) * ub_cap);
+      }
+      skip_space();
+      c = _peekc(); /* inner '{', or outer '}' */
+      check(c != EOF, "incomplete union definition");
+      check(c == '{' || c == '}',
+            "unexpected char '%c' in union definition", c);
+    }
+    ag->u.ub[ub_len] = 0;
     skip_space();
-    expect_char('}');
+    expect_char('}'); /* outer '}' */
   } else {
     check(c != EOF, "incomplete TYPE");
     ag->u.sb = expect_struct_body(/*expect_lbrace=*/0);

@@ -146,14 +146,20 @@ static void dump_sb(ArrType *sb) {
 void ir_dump_typedef(void) {
   int i;
   AgType ag;
+  ArrType **ub;
   for (i = 0; i < next_ag_id; ++i) {
     ag = ag_type_pool[i];
     printf("type %s = align %d ", Ident_to_str(ag.ident), 1 << ag.log_align);
     if (ag.is_opaque) {
       printf("{ %d }", ag.size);
     } else if (ag.is_union) {
-      fail("union dump not implemented");
-      /* TODO: dump union */
+      ub = ag.u.ub;
+      printf("{");
+      while (*ub) {
+        printf(" ");
+        dump_sb(*ub++);
+      }
+      printf(" }");
     } else {
       dump_sb(ag.u.sb);
     }
