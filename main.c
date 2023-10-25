@@ -4,11 +4,13 @@
 
 int main(int argc, char *argv[]) {
   FILE *f;
+  int need_close = 0;
+  ParseResult ir;
 
   assert(sizeof(Type) == 4);
   assert(sizeof(ArrType) == 8);
   assert(sizeof(AgType) == 16);
-  assert(sizeof(DataDef) == 48);
+  assert(sizeof(DataDef) == 40);
   assert(sizeof(Block) == 12);
   assert(sizeof(FuncDef) == 56);
   assert(sizeof(Instr) == 72);
@@ -19,14 +21,18 @@ int main(int argc, char *argv[]) {
   }
 
   if (argv[1][0] == '-' && argv[1][1] == '\0') {
-    parse(stdin);
+    f = stdin;
   } else {
     f = fopen(argv[1], "r");
-    parse(f);
-    fclose(f);
+    need_close = 1;
   }
 
+  ir = parse(f);
+
+  if (need_close) fclose(f);
+
   ir_dump_typedef();
+  ir_dump_datadef(ir.first_datadef_id);
 
   ir_cleanup();
   return 0;

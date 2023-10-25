@@ -9,6 +9,8 @@ typedef struct Ident {
   uint16_t idx; /* idx within slot */
 } Ident;
 
+/* all "_id" fields (e.g. instr_id, ag_id) mean null if set to 0 */
+
 typedef struct Value {
   enum {
     V_UNKNOWN,
@@ -19,18 +21,17 @@ typedef struct Value {
     V_CSYM,
     V_CTHS,
     /* SSA values */
-    V_ID,
-    V_SYM /* func param */
+    V_TMP
   } t;
   union {
     uint64_t u64;
     float s;
     double d;
-    Ident ident;
+    Ident global_ident; /* global symbol, i.e. $IDENT */
     /* DYNCONST := CONST | 'thread' $IDENT */
     Ident thread_ident;
 
-    uint32_t instr_id; /* idx into instr_pool; 0 means null */
+    Ident tmp_ident; /* func-scope tmps, i.e. %IDENT */
   } u;
 } Value;
 
@@ -103,22 +104,23 @@ typedef struct DataItem {
 } DataItem;
 
 typedef struct DataDefItem {
+  uint8_t is_dummy_item;
   uint8_t is_ext_ty;
-  uint8_t ext_ty;
-  uint32_t zero_size; /* only if !is_ext_ty */
-  uint16_t items_len;
-  uint16_t items_cap;
-  DataItem *items;
+  union {
+    struct {
+      Type t;
+      DataItem *items; /* ends with DI_UNKNOWN */
+    } ext_ty;
+    uint32_t zero_size;
+  } u;
 } DataDefItem;
 
 typedef struct DataDef {
   Linkage linkage;
   Ident ident;
   uint8_t log_align;
-  uint16_t items_len;
-  uint16_t items_cap;
-  uint16_t next_id; /* idx into data_def_pool; 0 means null */
-  DataDefItem *items;
+  uint16_t next_id;
+  DataDefItem *items; /* ends with is_dummy_item */
 } DataDef;
 
 typedef struct Instr {
@@ -230,14 +232,14 @@ typedef struct Instr {
       } *args;
     } phi;
   } u;
-  uint32_t next_id; /* idx into instr_pool; 0 means null */
+  uint32_t next_id;
 } Instr;
 
 typedef struct Block Block;
 struct Block {
   Ident ident;
   uint32_t instr_id;
-  uint16_t next_id; /* idx into blk_pool; 0 means null */
+  uint16_t next_id;
 };
 
 typedef struct FuncDef {
@@ -253,7 +255,7 @@ typedef struct FuncDef {
   uint8_t is_varargs:1;
   uint8_t has_env_arg:1;
   uint16_t blk_id;
-  uint16_t next_id; /* idx into func_def_pool; 0 means null */
+  uint16_t next_id;
 } FuncDef;
 
 /* ir.c */
@@ -261,13 +263,25 @@ Ident Ident_from_str(const char *);
 const char *Ident_to_str(Ident);
 int Ident_eq(Ident, Ident);
 int Type_is_subty(Type);
+int Type_is_extty(Type);
+Type AgType_lookup_or_fail(Ident);
 Type AgType_lookup_or_alloc(Ident);
 AgType *AgType_get(Type);
+uint16_t DataDef_alloc(Ident);
+uint16_t DataDef_lookup(Ident);
+DataDef *DataDef_get(uint16_t);
+uint16_t FuncDef_alloc(Ident);
+uint16_t FuncDef_lookup(Ident);
+FuncDef *FuncDef_get(uint16_t);
 void ir_dump_typedef(void);
+void ir_dump_datadef(uint16_t);
 void ir_cleanup(void);
 
 /* parse.c */
-void parse(FILE *);
+typedef struct ParseResult {
+  uint16_t first_datadef_id;
+} ParseResult;
+ParseResult parse(FILE *);
 
 /* util.c */
 void check(int cond, const char *, ...); /* like assert(), but always enabled */

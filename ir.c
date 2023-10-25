@@ -13,9 +13,9 @@ struct HashNode {
 static HashNode *ident_tbl[1024]; /* 16 KB; hash table */
 
 static AgType ag_type_pool[1024]; /* 16 KB */
-static int next_ag_id = 0;
+static int next_ag_id = 1;
 
-static DataDef data_def_pool[1024]; /* 48 KB */
+static DataDef data_def_pool[1024]; /* 40 KB */
 static int next_data_def_id = 1;
 
 static Instr instr_pool[1024]; /* 72 KB */
@@ -88,11 +88,27 @@ int Type_is_subty(Type t) {
   return 0;
 }
 
+int Type_is_extty(Type t) {
+  switch (t.t) {
+  case TP_W: case TP_L: case TP_S: case TP_D:
+  case TP_B: case TP_H:
+    return 1;
+  }
+  return 0;
+}
+
+Type AgType_lookup_or_fail(Ident ident) {
+  int prev = next_ag_id;
+  Type t = AgType_lookup_or_alloc(ident);
+  check(t.ag_id != prev, "type %s not found", Ident_to_str(ident));
+  return t;
+}
+
 Type AgType_lookup_or_alloc(Ident ident) {
   int i;
   Type t = {0};
   t.t = TP_AG;
-  for (i = 0; i < next_ag_id; ++i) {
+  for (i = 1; i < next_ag_id; ++i) {
     if (Ident_eq(ag_type_pool[i].ident, ident)) {
       t.ag_id = i;
       return t;
@@ -107,7 +123,58 @@ Type AgType_lookup_or_alloc(Ident ident) {
 
 AgType *AgType_get(Type t) {
   assert(t.t == TP_AG);
+  assert(t.ag_id != 0);
   return &ag_type_pool[t.ag_id];
+}
+
+uint16_t DataDef_alloc(Ident ident) {
+  int r = next_data_def_id++;
+  check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
+        "redefinition of '%s'", Ident_to_str(ident));
+  assert((uint64_t) next_data_def_id < countof(data_def_pool));
+  data_def_pool[r].ident = ident;
+  return r;
+}
+
+uint16_t DataDef_lookup(Ident ident) {
+  int i;
+  for (i = 1; i < next_data_def_id; ++i) {
+    if (Ident_eq(ident, data_def_pool[i].ident)) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+DataDef *DataDef_get(uint16_t id) {
+  if (id == 0) return 0;
+  assert((int) id < next_data_def_id);
+  return &data_def_pool[id];
+}
+
+uint16_t FuncDef_alloc(Ident ident) {
+  int r = next_func_def_id++;
+  check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
+        "redefinition of '%s'", Ident_to_str(ident));
+  assert((uint64_t) next_func_def_id < countof(func_def_pool));
+  func_def_pool[r].ident = ident;
+  return r;
+}
+
+uint16_t FuncDef_lookup(Ident ident) {
+  int i;
+  for (i = 1; i < next_func_def_id; ++i) {
+    if (Ident_eq(ident, func_def_pool[i].ident)) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+FuncDef *FuncDef_get(uint16_t id) {
+  if (id == 0) return 0;
+  assert((int) id < next_func_def_id);
+  return &func_def_pool[id];
 }
 
 static void dump_type(Type t) {
@@ -147,7 +214,7 @@ void ir_dump_typedef(void) {
   int i;
   AgType ag;
   ArrType **ub;
-  for (i = 0; i < next_ag_id; ++i) {
+  for (i = 1; i < next_ag_id; ++i) {
     ag = ag_type_pool[i];
     printf("type %s = align %d ", Ident_to_str(ag.ident), 1 << ag.log_align);
     if (ag.is_opaque) {
@@ -164,6 +231,17 @@ void ir_dump_typedef(void) {
       dump_sb(ag.u.sb);
     }
     printf("\n");
+  }
+}
+
+void ir_dump_datadef(uint16_t id) {
+  DataDef *dd;
+
+  while (id) {
+    dd = DataDef_get(id);
+    /* TODO: dump DATADEF */
+
+    id = dd->next_id;
   }
 }
 
@@ -186,7 +264,7 @@ static void Ident_cleanup(void) {
 static void AgType_cleanup(void) {
   int i;
   ArrType **ub;
-  for (i = 0; i < next_ag_id; ++i) {
+  for (i = 1; i < next_ag_id; ++i) {
     if (ag_type_pool[i].is_opaque) {
       continue;
     } else if (ag_type_pool[i].is_union) {
@@ -203,28 +281,28 @@ static void AgType_cleanup(void) {
 
 static void DataDef_cleanup(void) {
   int i, j, k;
-  DataDef *d;
-  DataItem *di;
+  DataDef *dd;
+  DataItem *p;
   for (i = 1; i < next_data_def_id; ++i) {
-    d = &data_def_pool[i];
-    assert(d->items);
-    for (j = 0; j < d->items_len; ++j) {
-      assert(d->items[j].items);
-      for (k = 0; k < d->items[j].items_len; ++k) {
-        di = &d->items[j].items[k];
-        if (di->t == DI_STR) {
-          assert(di->u.str);
-          free(di->u.str);
-        }
+    dd = &data_def_pool[i];
+    assert(dd->items);
+    for (j = 0; !dd->items[j].is_dummy_item; ++j) {
+      if (!dd->items[j].is_ext_ty) continue;
+      p = dd->items[j].u.ext_ty.items;
+      assert(p);
+      for (k = 0; p[k].t != DI_UNKNOWN; ++k) {
+        if (p[k].t != DI_STR) continue;
+        assert(p[k].u.str);
+        free(p[k].u.str);
       }
-      free(d->items[j].items);
+      free(p);
     }
-    free(d->items);
+    free(dd->items);
 
-    if(d->linkage.sec_name)
-      free(d->linkage.sec_name);
-    if(d->linkage.sec_flags)
-      free(d->linkage.sec_flags);
+    if(dd->linkage.sec_name)
+      free(dd->linkage.sec_name);
+    if(dd->linkage.sec_flags)
+      free(dd->linkage.sec_flags);
   }
 }
 
@@ -260,9 +338,9 @@ void ir_cleanup(void) {
   (void)blk_pool;
   (void)next_blk_id;
 
-  Ident_cleanup();
-  AgType_cleanup();
-  DataDef_cleanup();
-  Instr_cleanup();
   FuncDef_cleanup();
+  Instr_cleanup();
+  DataDef_cleanup();
+  AgType_cleanup();
+  Ident_cleanup();
 }

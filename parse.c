@@ -343,7 +343,234 @@ static Linkage expect_linkage(void) {
   }
 }
 
-void parse(FILE *_input) {
+/*
+ * f32: 's_' FP
+ * f64: 'd_' FP
+ */
+static double expect_fp(int is_f32) {
+  int c;
+  int i = 0;
+  char buf[30];
+  float f;
+  double d;
+  c = _getc();
+  check(c == 's' || c == 'd', "FP should begin with 's_' or 'd_'");
+  expect_char('_');
+  c = _getc();
+  while (i < (int) sizeof(buf)
+       && (isalnum(c) || c == '.' || c == '+' || c == '-')) {
+    buf[i++] = c;
+  }
+  if (c != EOF) _ungetc(c);
+  assert(i < (int) sizeof(buf));
+  buf[i] = '\0';
+  if (is_f32) {
+    check(sscanf(buf, "%f", &f) == i, "illegal FP: s_%s", buf);
+    return (double) f;
+  } else {
+    check(sscanf(buf, "%lf", &d) == i, "illegal FP: d_%s", buf);
+    return d;
+  }
+}
+
+/*
+ * VALUE := DYNCONST | %IDENT
+ * DYNCONST := CONST | 'thread' $IDENT
+ * CONST := ['-'] NUMBER | 's_' FP | 'd_' FP | $IDENT
+ */
+static Value expect_value(void) {
+  Value v = {0};
+  switch (_peekc()) {
+  case '%':
+    v.t = V_TMP;
+    v.u.tmp_ident = expect_ident();
+    break;
+  case 't':
+    expect_keyword("thread");
+    skip_space();
+    check(_peekc() == '$', "$IDENT expected for thread-local symbol");
+    v.t = V_CTHS;
+    v.u.thread_ident = expect_ident();
+    break;
+  case '-':
+    _getc();
+    v.t = V_CI;
+    v.u.u64 = (uint64_t) (-(int64_t) expect_number());
+    break;
+  case '0': case '1': case '2': case '3': case '4':
+  case '5': case '6': case '7': case '8': case '9':
+    v.t = V_CI;
+    v.u.u64 = expect_number();
+    break;
+  case 's':
+    v.t = V_CS;
+    v.u.s = (float) expect_fp(/*is_f32=*/1);
+    break;
+  case 'd':
+    v.t = V_CD;
+    v.u.d = expect_fp(/*is_f32=*/0);
+    break;
+  case '$':
+    v.t = V_CSYM;
+    v.u.global_ident = expect_ident();
+    break;
+  case EOF:
+    fail("VALUE expected, got EOF");
+  default:
+    fail("VALUE expected, got '%c'", _peekc());
+  }
+  return v;
+}
+
+static Value expect_const(void) {
+  Value v = expect_value();
+  check(v.t == V_CI || v.t == V_CS || v.t == V_CD || v.t == V_CSYM,
+        "CONST expected, got value type %d", v.t);
+  return v;
+}
+
+/*
+ * DATAITEM :=
+ *     $IDENT ['+' NUMBER]  # Symbol and offset
+ *   |  '"' ... '"'         # String
+ *   |  CONST               # Constant
+ */
+static DataItem expect_dataitem_single(void) {
+  DataItem di;
+  switch (_peekc()) {
+  case '$':
+    di.t = DI_SYM_OFF;
+    di.u.sym_off.ident = expect_ident();
+    di.u.sym_off.offset = 0;
+    skip_space();
+    if (_peekc() == '+') {
+      expect_char('+');
+      skip_space();
+      di.u.sym_off.offset = expect_number();
+    }
+    return di;
+  case '"':
+    di.t = DI_STR;
+    di.u.str = expect_str();
+    return di;
+  default:
+    di.t = DI_CONST;
+    di.u.cst = expect_const();
+    return di;
+  }
+}
+
+/* expects DATAITEM+, terminated with ',' or '}' */
+static DataItem *expect_dataitem_rep(void) {
+  int c;
+  int i = 0, cap = 4;
+  DataItem *di;
+  di = malloc(sizeof(di[0]) * cap);
+  di[i++] = expect_dataitem_single();
+  skip_space();
+  while (1) {
+    c = _peekc();
+    if (c == ',' || c == '}') break;
+    di[i++] = expect_dataitem_single();
+    skip_space();
+    if (i == cap) {
+      cap += 4;
+      di = realloc(di, sizeof(di[0]) * cap);
+    }
+  }
+  di[i].t = DI_UNKNOWN;
+  return di;
+}
+
+/* expects '{' ( EXTTY DATAITEM+ | 'z' NUMBER ), '}' */
+static DataDefItem *expect_datadef_body(void) {
+  int c;
+  int i = 0, cap = 4;
+  DataDefItem *ddi;
+  ddi = malloc(sizeof(ddi[0]) * cap);
+  expect_char('{');
+  skip_space();
+  while ((c = _peekc()) != '}') {
+    check(c != EOF, "DATADEF body incomplete");
+    ddi[i].is_dummy_item = 0;
+    if (c == 'z') {
+      expect_keyword("z");
+      skip_space();
+      ddi[i].is_ext_ty = 0;
+      ddi[i].u.zero_size = expect_number();
+    } else {
+      ddi[i].is_ext_ty = 1;
+      ddi[i].u.ext_ty.t = expect_type();
+      check(Type_is_extty(ddi[i].u.ext_ty.t),
+            "EXTTY expected in DATADEF body");
+      skip_space();
+      ddi[i].u.ext_ty.items = expect_dataitem_rep();
+    }
+
+    i++;
+    if (i == sizeof(cap)) {
+      cap += 4;
+      ddi = realloc(ddi, sizeof(ddi[0]) * cap);
+    }
+
+    skip_space();
+    c = _peekc();
+    if (c == ',') {
+      _getc();
+      skip_space();
+    } else {
+      check(c == '}', "',' or '}' expected in DATADEF body");
+    }
+  }
+  assert(_getc() == '}');
+  ddi[i].is_dummy_item = 1;
+  return ddi;
+}
+
+/*
+ * DATADEF :=
+ *     LINKAGE*
+ *     'data' $IDENT '=' ['align' NUMBER]
+ *     '{'
+ *         ( EXTTY DATAITEM+
+ *         | 'z'   NUMBER ),
+ *     '}'
+ */
+static uint16_t expect_datadef(Linkage linkage) {
+  uint16_t dd_id;
+  DataDef *dd;
+
+  expect_keyword("data");
+  skip_space();
+  check(_peekc() == '$', "$IDENT expected");
+  dd_id = DataDef_alloc(expect_ident());
+  dd = DataDef_get(dd_id);
+  dd->linkage = linkage;
+  skip_space();
+  expect_char('=');
+  skip_space();
+  if (_peekc() == 'a') {
+    expect_keyword("align");
+    skip_space();
+    switch (expect_number()) {
+#define F(n) case (1 << n): dd->log_align = n; break
+      /* align  1 => log_align = 0
+         align 16 => log_align = 4 */
+      F(0); F(1); F(2); F(3); F(4);
+#undef F
+    default:
+      fail("unsupported alignment");
+      return 0; /* unreachable */
+    }
+  }
+  skip_space();
+  dd->items = expect_datadef_body();
+  return dd_id;
+}
+
+ParseResult parse(FILE *_input) {
+  ParseResult r = {0};
+  uint16_t cur_dd = 0, dd = 0;
   Linkage linkage;
   input = _input;
 
@@ -355,15 +582,28 @@ void parse(FILE *_input) {
     expect_typedef();
     goto TAIL_CALL;
   default:
-    (void)expect_linkage;
-    (void)linkage;
-    fail("funcdef / datadef parsing not implemented");
-#if 0
     linkage = expect_linkage();
     skip_space();
-#endif
-    /* TODO: funcdef, datadef */
+    switch (_peekc()) {
+    case 'd': /* 'data' */
+      dd = expect_datadef(linkage);
+      if (cur_dd) {
+        DataDef_get(cur_dd)->next_id = dd;
+      } else {
+        r.first_datadef_id = dd;
+      }
+      cur_dd = dd;
+      goto TAIL_CALL;
+    case 'f': /* 'function' */
+      /* TODO: funcdef parsing */
+      fail("funcdef parsing not implemented");
+      goto TAIL_CALL;
+    default:
+      fail("unexpected global definition");
+    }
   }
 
   /* TODO: fix AgType size and log_align */
+  /* TODO: fix DataDef log_align */
+  return r;
 }
