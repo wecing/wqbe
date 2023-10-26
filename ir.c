@@ -234,13 +234,77 @@ void ir_dump_typedef(void) {
   }
 }
 
+/* dump string literal. */
+static void dump_str(const char *s) {
+  printf("\"%s\"", s);
+}
+
+static void dump_linkage(Linkage v) {
+  if (v.is_export) printf("export ");
+  if (v.is_thread) printf("thread ");
+  if (v.is_section) {
+    printf("section ");
+    dump_str(v.sec_name);
+    printf(" ");
+    if (v.sec_flags) {
+      dump_str(v.sec_flags);
+      printf(" ");
+    }
+  }
+}
+
+static void dump_value(Value v) {
+  switch (v.t) {
+  case V_CI: printf("%llu", v.u.u64); break;
+  case V_CS: printf("%f", v.u.s); break;
+  case V_CD: printf("%lf", v.u.d); break;
+  case V_CSYM: case V_CTHS: case V_TMP:
+    /* doesn't matter which _ident we use */
+    printf("%s", Ident_to_str(v.u.global_ident));
+    break;
+  default:
+    fail("unrecognized Value type: %d", v.t);
+  }
+}
+
 void ir_dump_datadef(uint16_t id) {
   DataDef *dd;
+  DataItem *p;
+  int i, j;
 
   while (id) {
     dd = DataDef_get(id);
-    /* TODO: dump DATADEF */
-
+    dump_linkage(dd->linkage);
+    printf("%s = align %d {", Ident_to_str(dd->ident), 1 << dd->log_align);
+    assert(dd->items);
+    for (i = 0; !dd->items[i].is_dummy_item; ++i) {
+      if (dd->items[i].is_ext_ty) {
+        printf(" ");
+        dump_type(dd->items[i].u.ext_ty.t);
+        p = dd->items[i].u.ext_ty.items;
+        assert(p);
+        for (j = 0; p[j].t != DI_UNKNOWN; ++j) {
+          printf(" ");
+          if (p[j].t == DI_SYM_OFF) {
+            printf("%s", Ident_to_str(p[j].u.sym_off.ident));
+            if (p[j].u.sym_off.offset) {
+              printf(" + %d", p[j].u.sym_off.offset);
+            }
+          } else if (p[j].t == DI_STR) {
+            dump_str(p[j].u.str);
+          } else {
+            assert(p[j].t == DI_CONST);
+            dump_value(p[j].u.cst);
+          }
+        }
+      } else {
+        printf(" z %d", dd->items[i].u.zero_size);
+      }
+      if (!dd->items[i+1].is_dummy_item) {
+        printf(",");
+      }
+    }
+    printf(" }\n");
     id = dd->next_id;
   }
 }

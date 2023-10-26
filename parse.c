@@ -463,7 +463,7 @@ static DataItem expect_dataitem_single(void) {
 /* expects DATAITEM+, terminated with ',' or '}' */
 static DataItem *expect_dataitem_rep(void) {
   int c;
-  int i = 0, cap = 4;
+  int i = 0, cap = 2;
   DataItem *di;
   di = malloc(sizeof(di[0]) * cap);
   di[i++] = expect_dataitem_single();
@@ -478,6 +478,7 @@ static DataItem *expect_dataitem_rep(void) {
       di = realloc(di, sizeof(di[0]) * cap);
     }
   }
+  assert(i < cap);
   di[i].t = DI_UNKNOWN;
   return di;
 }
@@ -508,7 +509,7 @@ static DataDefItem *expect_datadef_body(void) {
     }
 
     i++;
-    if (i == sizeof(cap)) {
+    if (i == cap) {
       cap += 4;
       ddi = realloc(ddi, sizeof(ddi[0]) * cap);
     }
@@ -523,6 +524,7 @@ static DataDefItem *expect_datadef_body(void) {
     }
   }
   assert(_getc() == '}');
+  assert(i < cap);
   ddi[i].is_dummy_item = 1;
   return ddi;
 }
