@@ -6,8 +6,8 @@
 
 typedef struct HashNode HashNode;
 struct HashNode {
-  char *s;
-  HashNode *next;
+    char *s;
+    HashNode *next;
 };
 
 static HashNode *ident_tbl[1024]; /* 16 KB; hash table */
@@ -29,382 +29,383 @@ static int next_func_def_id = 1;
 
 /* djb2 hashing */
 static unsigned long hash(const char *s) {
-  char c;
-  unsigned long hash = 5381;
-  while ((c = *s++) != 0) {
-    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-  }
-  return hash;
+    char c;
+    unsigned long hash = 5381;
+    while ((c = *s++) != 0) {
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+    return hash;
 }
 
 Ident Ident_from_str(const char *s) {
-  const int entries_cnt = countof(ident_tbl);
-  Ident ident = {.slot = 0, .idx = 0};
-  HashNode *node = 0, **node_p = 0;
+    const int entries_cnt = countof(ident_tbl);
+    Ident ident = {.slot = 0, .idx = 0};
+    HashNode *node = 0, **node_p = 0;
 
-  if (s) {
-    ident.slot = (hash(s) % (entries_cnt - 1)) + 1;
-    node_p = &ident_tbl[ident.slot];
-    node = *node_p;
-    while (node && node->s && strcmp(s, node->s) != 0) {
-      ident.idx++;
-      node_p = &node->next;
-      node = *node_p;
+    if (s) {
+        ident.slot = (hash(s) % (entries_cnt - 1)) + 1;
+        node_p = &ident_tbl[ident.slot];
+        node = *node_p;
+        while (node && node->s && strcmp(s, node->s) != 0) {
+            ident.idx++;
+            node_p = &node->next;
+            node = *node_p;
+        }
+        if (!node) {
+            node = calloc(1, sizeof(*node));
+            node->s = strdup(s);
+            node->next = 0;
+            *node_p = node;
+        }
     }
-    if (!node) {
-      node = calloc(1, sizeof(*node));
-      node->s = strdup(s);
-      node->next = 0;
-      *node_p = node;
-    }
-  }
-  return ident;
+    return ident;
 }
 
 /* returns null if input is 0 */
 const char *Ident_to_str(Ident s) {
-  HashNode *node;
-  uint16_t rem_steps;
+    HashNode *node;
+    uint16_t rem_steps;
 
-  node = ident_tbl[s.slot];
-  rem_steps = s.idx;
-  assert(node);
-  while (rem_steps--) {
-    node = node->next;
+    node = ident_tbl[s.slot];
+    rem_steps = s.idx;
     assert(node);
-  }
-  return node->s;
+    while (rem_steps--) {
+        node = node->next;
+        assert(node);
+    }
+    return node->s;
 }
 
 int Ident_eq(Ident x, Ident y) { return x.slot == y.slot && x.idx == y.idx; }
 
 int Type_is_subty(Type t) {
-  switch (t.t) {
-  case TP_W: case TP_L: case TP_S: case TP_D:
-  case TP_B: case TP_H:
-  case TP_AG:
-    return 1;
-  }
-  return 0;
+    switch (t.t) {
+    case TP_W: case TP_L: case TP_S: case TP_D:
+    case TP_B: case TP_H:
+    case TP_AG:
+        return 1;
+    }
+    return 0;
 }
 
 int Type_is_extty(Type t) {
-  switch (t.t) {
-  case TP_W: case TP_L: case TP_S: case TP_D:
-  case TP_B: case TP_H:
-    return 1;
-  }
-  return 0;
+    switch (t.t) {
+    case TP_W: case TP_L: case TP_S: case TP_D:
+    case TP_B: case TP_H:
+        return 1;
+    }
+    return 0;
 }
 
 Type AgType_lookup_or_fail(Ident ident) {
-  int prev = next_ag_id;
-  Type t = AgType_lookup_or_alloc(ident);
-  check(t.ag_id != prev, "type %s not found", Ident_to_str(ident));
-  return t;
+    int prev = next_ag_id;
+    Type t = AgType_lookup_or_alloc(ident);
+    check(t.ag_id != prev, "type %s not found", Ident_to_str(ident));
+    return t;
 }
 
 Type AgType_lookup_or_alloc(Ident ident) {
-  int i;
-  Type t = {0};
-  t.t = TP_AG;
-  for (i = 1; i < next_ag_id; ++i) {
-    if (Ident_eq(ag_type_pool[i].ident, ident)) {
-      t.ag_id = i;
-      return t;
+    int i;
+    Type t = {0};
+    t.t = TP_AG;
+    for (i = 1; i < next_ag_id; ++i) {
+        if (Ident_eq(ag_type_pool[i].ident, ident)) {
+            t.ag_id = i;
+            return t;
+        }
     }
-  }
 
-  assert((uint64_t) next_ag_id < countof(ag_type_pool) - 1);
-  ag_type_pool[next_ag_id].ident = ident;
-  t.ag_id = next_ag_id++;
-  return t;
+    assert((uint64_t) next_ag_id < countof(ag_type_pool) - 1);
+    ag_type_pool[next_ag_id].ident = ident;
+    t.ag_id = next_ag_id++;
+    return t;
 }
 
 AgType *AgType_get(Type t) {
-  assert(t.t == TP_AG);
-  assert(t.ag_id != 0);
-  return &ag_type_pool[t.ag_id];
+    assert(t.t == TP_AG);
+    assert(t.ag_id != 0);
+    return &ag_type_pool[t.ag_id];
 }
 
 uint16_t DataDef_alloc(Ident ident) {
-  int r = next_data_def_id++;
-  check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
-        "redefinition of '%s'", Ident_to_str(ident));
-  assert((uint64_t) next_data_def_id < countof(data_def_pool));
-  data_def_pool[r].ident = ident;
-  return r;
+    int r = next_data_def_id++;
+    check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
+          "redefinition of '%s'", Ident_to_str(ident));
+    assert((uint64_t) next_data_def_id < countof(data_def_pool));
+    data_def_pool[r].ident = ident;
+    return r;
 }
 
 uint16_t DataDef_lookup(Ident ident) {
-  int i;
-  for (i = 1; i < next_data_def_id; ++i) {
-    if (Ident_eq(ident, data_def_pool[i].ident)) {
-      return i;
+    int i;
+    for (i = 1; i < next_data_def_id; ++i) {
+        if (Ident_eq(ident, data_def_pool[i].ident)) {
+            return i;
+        }
     }
-  }
-  return 0;
+    return 0;
 }
 
 DataDef *DataDef_get(uint16_t id) {
-  if (id == 0) return 0;
-  assert((int) id < next_data_def_id);
-  return &data_def_pool[id];
+    if (id == 0) return 0;
+    assert((int) id < next_data_def_id);
+    return &data_def_pool[id];
 }
 
 uint16_t FuncDef_alloc(Ident ident) {
-  int r = next_func_def_id++;
-  check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
-        "redefinition of '%s'", Ident_to_str(ident));
-  assert((uint64_t) next_func_def_id < countof(func_def_pool));
-  func_def_pool[r].ident = ident;
-  return r;
+    int r = next_func_def_id++;
+    check(DataDef_lookup(ident) == 0 && FuncDef_lookup(ident) == 0,
+          "redefinition of '%s'", Ident_to_str(ident));
+    assert((uint64_t) next_func_def_id < countof(func_def_pool));
+    func_def_pool[r].ident = ident;
+    return r;
 }
 
 uint16_t FuncDef_lookup(Ident ident) {
-  int i;
-  for (i = 1; i < next_func_def_id; ++i) {
-    if (Ident_eq(ident, func_def_pool[i].ident)) {
-      return i;
+    int i;
+    for (i = 1; i < next_func_def_id; ++i) {
+        if (Ident_eq(ident, func_def_pool[i].ident)) {
+            return i;
+        }
     }
-  }
-  return 0;
+    return 0;
 }
 
 FuncDef *FuncDef_get(uint16_t id) {
-  if (id == 0) return 0;
-  assert((int) id < next_func_def_id);
-  return &func_def_pool[id];
+    if (id == 0) return 0;
+    assert((int) id < next_func_def_id);
+    return &func_def_pool[id];
 }
 
 static void dump_type(Type t) {
-  switch (t.t) {
-  case TP_W: printf("w"); break;
-  case TP_L: printf("l"); break;
-  case TP_S: printf("s"); break;
-  case TP_D: printf("d"); break;
-  case TP_B: printf("b"); break;
-  case TP_H: printf("h"); break;
-  case TP_SB: printf("sb"); break;
-  case TP_SH: printf("sh"); break;
-  case TP_UB: printf("ub"); break;
-  case TP_UH: printf("uh"); break;
-  case TP_AG:
-    printf("%s", Ident_to_str(AgType_get(t)->ident));
-    break;
-  case TP_NONE:
-    break;
-  default:
-    fail("unrecognized TYPE kind: %d", t.t);
-  }
+    switch (t.t) {
+    case TP_W: printf("w"); break;
+    case TP_L: printf("l"); break;
+    case TP_S: printf("s"); break;
+    case TP_D: printf("d"); break;
+    case TP_B: printf("b"); break;
+    case TP_H: printf("h"); break;
+    case TP_SB: printf("sb"); break;
+    case TP_SH: printf("sh"); break;
+    case TP_UB: printf("ub"); break;
+    case TP_UH: printf("uh"); break;
+    case TP_AG:
+        printf("%s", Ident_to_str(AgType_get(t)->ident));
+        break;
+    case TP_NONE:
+        break;
+    default:
+        fail("unrecognized TYPE kind: %d", t.t);
+    }
 }
 
 static void dump_sb(ArrType *sb) {
-  printf("{");
-  while (sb->t.t != TP_UNKNOWN) {
-    printf(" ");
-    dump_type(sb->t);
-    printf(" %d%c", sb->count, sb[1].t.t == TP_UNKNOWN ? ' ' : ',');
-    sb++;
-  }
-  printf("}");
+    printf("{");
+    while (sb->t.t != TP_UNKNOWN) {
+        printf(" ");
+        dump_type(sb->t);
+        printf(" %d%c", sb->count, sb[1].t.t == TP_UNKNOWN ? ' ' : ',');
+        sb++;
+    }
+    printf("}");
 }
 
 void ir_dump_typedef(void) {
-  int i;
-  AgType ag;
-  ArrType **ub;
-  for (i = 1; i < next_ag_id; ++i) {
-    ag = ag_type_pool[i];
-    printf("type %s = align %d ", Ident_to_str(ag.ident), 1 << ag.log_align);
-    if (ag.is_opaque) {
-      printf("{ %d }", ag.size);
-    } else if (ag.is_union) {
-      ub = ag.u.ub;
-      printf("{");
-      while (*ub) {
-        printf(" ");
-        dump_sb(*ub++);
-      }
-      printf(" }");
-    } else {
-      dump_sb(ag.u.sb);
+    int i;
+    AgType ag;
+    ArrType **ub;
+    for (i = 1; i < next_ag_id; ++i) {
+        ag = ag_type_pool[i];
+        printf("type %s = align %d ",
+               Ident_to_str(ag.ident), 1 << ag.log_align);
+        if (ag.is_opaque) {
+            printf("{ %d }", ag.size);
+        } else if (ag.is_union) {
+            ub = ag.u.ub;
+            printf("{");
+            while (*ub) {
+                printf(" ");
+                dump_sb(*ub++);
+            }
+            printf(" }");
+        } else {
+            dump_sb(ag.u.sb);
+        }
+        printf("\n");
     }
-    printf("\n");
-  }
 }
 
 /* dump string literal. */
 static void dump_str(const char *s) {
-  printf("\"%s\"", s);
+    printf("\"%s\"", s);
 }
 
 static void dump_linkage(Linkage v) {
-  if (v.is_export) printf("export ");
-  if (v.is_thread) printf("thread ");
-  if (v.is_section) {
-    printf("section ");
-    dump_str(v.sec_name);
-    printf(" ");
-    if (v.sec_flags) {
-      dump_str(v.sec_flags);
-      printf(" ");
+    if (v.is_export) printf("export ");
+    if (v.is_thread) printf("thread ");
+    if (v.is_section) {
+        printf("section ");
+        dump_str(v.sec_name);
+        printf(" ");
+        if (v.sec_flags) {
+            dump_str(v.sec_flags);
+            printf(" ");
+        }
     }
-  }
 }
 
 static void dump_value(Value v) {
-  switch (v.t) {
-  case V_CI: printf("%llu", v.u.u64); break;
-  case V_CS: printf("%f", v.u.s); break;
-  case V_CD: printf("%lf", v.u.d); break;
-  case V_CSYM: case V_CTHS: case V_TMP:
-    /* doesn't matter which _ident we use */
-    printf("%s", Ident_to_str(v.u.global_ident));
-    break;
-  default:
-    fail("unrecognized Value type: %d", v.t);
-  }
+    switch (v.t) {
+    case V_CI: printf("%llu", v.u.u64); break;
+    case V_CS: printf("%f", v.u.s); break;
+    case V_CD: printf("%lf", v.u.d); break;
+    case V_CSYM: case V_CTHS: case V_TMP:
+        /* doesn't matter which _ident we use */
+        printf("%s", Ident_to_str(v.u.global_ident));
+        break;
+    default:
+        fail("unrecognized Value type: %d", v.t);
+    }
 }
 
 void ir_dump_datadef(uint16_t id) {
-  DataDef *dd;
-  DataItem *p;
-  int i, j;
+    DataDef *dd;
+    DataItem *p;
+    int i, j;
 
-  while (id) {
-    dd = DataDef_get(id);
-    dump_linkage(dd->linkage);
-    printf("%s = align %d {", Ident_to_str(dd->ident), 1 << dd->log_align);
-    assert(dd->items);
-    for (i = 0; !dd->items[i].is_dummy_item; ++i) {
-      if (dd->items[i].is_ext_ty) {
-        printf(" ");
-        dump_type(dd->items[i].u.ext_ty.t);
-        p = dd->items[i].u.ext_ty.items;
-        assert(p);
-        for (j = 0; p[j].t != DI_UNKNOWN; ++j) {
-          printf(" ");
-          if (p[j].t == DI_SYM_OFF) {
-            printf("%s", Ident_to_str(p[j].u.sym_off.ident));
-            if (p[j].u.sym_off.offset) {
-              printf(" + %d", p[j].u.sym_off.offset);
+    while (id) {
+        dd = DataDef_get(id);
+        dump_linkage(dd->linkage);
+        printf("%s = align %d {", Ident_to_str(dd->ident), 1 << dd->log_align);
+        assert(dd->items);
+        for (i = 0; !dd->items[i].is_dummy_item; ++i) {
+            if (dd->items[i].is_ext_ty) {
+                printf(" ");
+                dump_type(dd->items[i].u.ext_ty.t);
+                p = dd->items[i].u.ext_ty.items;
+                assert(p);
+                for (j = 0; p[j].t != DI_UNKNOWN; ++j) {
+                    printf(" ");
+                    if (p[j].t == DI_SYM_OFF) {
+                        printf("%s", Ident_to_str(p[j].u.sym_off.ident));
+                        if (p[j].u.sym_off.offset) {
+                            printf(" + %d", p[j].u.sym_off.offset);
+                        }
+                    } else if (p[j].t == DI_STR) {
+                        dump_str(p[j].u.str);
+                    } else {
+                        assert(p[j].t == DI_CONST);
+                        dump_value(p[j].u.cst);
+                    }
+                }
+            } else {
+                printf(" z %d", dd->items[i].u.zero_size);
             }
-          } else if (p[j].t == DI_STR) {
-            dump_str(p[j].u.str);
-          } else {
-            assert(p[j].t == DI_CONST);
-            dump_value(p[j].u.cst);
-          }
+            if (!dd->items[i+1].is_dummy_item) {
+                printf(",");
+            }
         }
-      } else {
-        printf(" z %d", dd->items[i].u.zero_size);
-      }
-      if (!dd->items[i+1].is_dummy_item) {
-        printf(",");
-      }
+        printf(" }\n");
+        id = dd->next_id;
     }
-    printf(" }\n");
-    id = dd->next_id;
-  }
 }
 
 static void Ident_cleanup(void) {
-  const int entries_cnt = countof(ident_tbl);
-  HashNode *node, *t;
-  int i;
+    const int entries_cnt = countof(ident_tbl);
+    HashNode *node, *t;
+    int i;
 
-  for (i = 1; i < entries_cnt; ++i) {
-    node = ident_tbl[i];
-    while (node) {
-      t = node;
-      node = node->next;
-      free(t->s);
-      free(t);
+    for (i = 1; i < entries_cnt; ++i) {
+        node = ident_tbl[i];
+        while (node) {
+            t = node;
+            node = node->next;
+            free(t->s);
+            free(t);
+        }
     }
-  }
 }
 
 static void AgType_cleanup(void) {
-  int i;
-  ArrType **ub;
-  for (i = 1; i < next_ag_id; ++i) {
-    if (ag_type_pool[i].is_opaque) {
-      continue;
-    } else if (ag_type_pool[i].is_union) {
-      ub = ag_type_pool[i].u.ub;
-      while (*ub) {
-        free(*ub++);
-      }
-      free(ag_type_pool[i].u.ub);
-    } else {
-      free(ag_type_pool[i].u.sb);
+    int i;
+    ArrType **ub;
+    for (i = 1; i < next_ag_id; ++i) {
+        if (ag_type_pool[i].is_opaque) {
+            continue;
+        } else if (ag_type_pool[i].is_union) {
+            ub = ag_type_pool[i].u.ub;
+            while (*ub) {
+                free(*ub++);
+            }
+            free(ag_type_pool[i].u.ub);
+        } else {
+            free(ag_type_pool[i].u.sb);
+        }
     }
-  }
 }
 
 static void DataDef_cleanup(void) {
-  int i, j, k;
-  DataDef *dd;
-  DataItem *p;
-  for (i = 1; i < next_data_def_id; ++i) {
-    dd = &data_def_pool[i];
-    assert(dd->items);
-    for (j = 0; !dd->items[j].is_dummy_item; ++j) {
-      if (!dd->items[j].is_ext_ty) continue;
-      p = dd->items[j].u.ext_ty.items;
-      assert(p);
-      for (k = 0; p[k].t != DI_UNKNOWN; ++k) {
-        if (p[k].t != DI_STR) continue;
-        assert(p[k].u.str);
-        free(p[k].u.str);
-      }
-      free(p);
-    }
-    free(dd->items);
+    int i, j, k;
+    DataDef *dd;
+    DataItem *p;
+    for (i = 1; i < next_data_def_id; ++i) {
+        dd = &data_def_pool[i];
+        assert(dd->items);
+        for (j = 0; !dd->items[j].is_dummy_item; ++j) {
+            if (!dd->items[j].is_ext_ty) continue;
+            p = dd->items[j].u.ext_ty.items;
+            assert(p);
+            for (k = 0; p[k].t != DI_UNKNOWN; ++k) {
+                if (p[k].t != DI_STR) continue;
+                assert(p[k].u.str);
+                free(p[k].u.str);
+            }
+            free(p);
+        }
+        free(dd->items);
 
-    if(dd->linkage.sec_name)
-      free(dd->linkage.sec_name);
-    if(dd->linkage.sec_flags)
-      free(dd->linkage.sec_flags);
-  }
+        if(dd->linkage.sec_name)
+            free(dd->linkage.sec_name);
+        if(dd->linkage.sec_flags)
+            free(dd->linkage.sec_flags);
+    }
 }
 
 static void Instr_cleanup(void) {
-  int i;
-  for (i = 1; i < next_instr_id; ++i) {
-    if (instr_pool[i].t == I_CALL) {
-      if (instr_pool[i].u.call.args)
-        free(instr_pool[i].u.call.args);
-    } else if (instr_pool[i].t == I_PHI) {
-      if (instr_pool[i].u.phi.args)
-        free(instr_pool[i].u.phi.args);
+    int i;
+    for (i = 1; i < next_instr_id; ++i) {
+        if (instr_pool[i].t == I_CALL) {
+            if (instr_pool[i].u.call.args)
+                free(instr_pool[i].u.call.args);
+        } else if (instr_pool[i].t == I_PHI) {
+            if (instr_pool[i].u.phi.args)
+                free(instr_pool[i].u.phi.args);
+        }
     }
-  }
 }
 
 static void FuncDef_cleanup(void) {
-  int i;
-  FuncDef *p;
-  for (i = 1; i < next_func_def_id; ++i) {
-    p = &func_def_pool[i];
-    if(p->linkage.sec_name)
-      free(p->linkage.sec_name);
-    if(p->linkage.sec_flags)
-      free(p->linkage.sec_flags);
-    if (p->params)
-      free(p->params);
-  }
+    int i;
+    FuncDef *p;
+    for (i = 1; i < next_func_def_id; ++i) {
+        p = &func_def_pool[i];
+        if(p->linkage.sec_name)
+            free(p->linkage.sec_name);
+        if(p->linkage.sec_flags)
+            free(p->linkage.sec_flags);
+        if (p->params)
+            free(p->params);
+    }
 }
 
 void ir_cleanup(void) {
-  /* TODO: parse blocks and remove */
-  (void)blk_pool;
-  (void)next_blk_id;
+    /* TODO: parse blocks and remove */
+    (void)blk_pool;
+    (void)next_blk_id;
 
-  FuncDef_cleanup();
-  Instr_cleanup();
-  DataDef_cleanup();
-  AgType_cleanup();
-  Ident_cleanup();
+    FuncDef_cleanup();
+    Instr_cleanup();
+    DataDef_cleanup();
+    AgType_cleanup();
+    Ident_cleanup();
 }
