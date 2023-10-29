@@ -54,7 +54,8 @@ typedef struct Type {
         TP_UB,
         TP_SH,
         TP_UH,
-        /* where type is optional, e.g. func return type is [ABITY] */
+        /* where type is optional, e.g. func return type is [ABITY];
+           or for 'env' params/args, which have no type */
         TP_NONE
     };
     uint32_t t:4;
@@ -126,103 +127,28 @@ typedef struct DataDef {
 typedef struct Instr {
     enum {
         I_UNKNOWN,
-
-        /* T: wlsd */
-        /* I: wl */
-        /* F: sd */
-        /* m: (ptr type) */
-        I_ADD, I_SUB, I_DIV, I_MUL, /* T(T, T) */
-        I_NEG, /* T(T, T) */
-        I_UDIV, I_REM, I_UREM, /* I(I, I) */
-        I_OR, I_XOR, I_AND, /* I(I, I) */
-        I_SAR, I_SHR, I_SHL, /* I(I, ww) */
-
-        I_STORED, /* (d, m) */
-        I_STORES, /* (s, m) */
-        I_STOREL, /* (l, m) */
-        I_STOREW, /* (w, m) */
-        I_STOREH, /* (w, m) */
-        I_STOREB, /* (w, m) */
-
-        I_LOADD, /* d(m) */
-        I_LOADS, /* s(m) */
-        I_LOADL, /* l(m) */
-        I_LOADSW, I_LOADUW, /* I(mm) */
-        I_LOADSH, I_LOADUH, /* I(mm) */
-        I_LOADSB, I_LOADUB, /* I(mm) */
-
-        I_BLIT, /* (m, m, w) */
-
-        I_ALLOC4, /* m(l) */
-        I_ALLOC8, /* m(l) */
-        I_ALLOC16, /* m(l) */
-
-        /* integer comparison: I(ws, ww) or I(ll, ll) */
-        I_CEQW, I_CEQL, /* == */
-        I_CNEW, I_CNEL, /* != */
-        I_CSLEW, I_CSLEL, /* signed <= */
-        I_CSLTW, I_CSLTL, /* signed < */
-        I_CSGEW, I_CSGEL, /* signed >= */
-        I_CSGTW, I_CSGTL, /* signed > */
-        I_CULEW, I_CULEL, /* unsigned <= */
-        I_CULTW, I_CULTL, /* unsigned < */
-        I_CUGEW, I_CUGEL, /* unsigned >= */
-        I_CUGTW, I_CUGTL, /* unsigned > */
-
-        /* floating point comparison: I(ss, ss) or I(dd, dd) */
-        I_CEQS, I_CEQD, /* == */
-        I_CNES, I_CNED, /* != */
-        I_CLES, I_CLED, /* <= */
-        I_CLTS, I_CLTD, /* < */
-        I_CGES, I_CGED, /* >= */
-        I_CGTS, I_CGTD, /* > */
-        I_COS, I_COD, /* ordered (no NaN) */
-        I_CUOS, I_CUOD, /* unordered (has NaN) */
-
-        I_EXTSW, I_EXTUW, /* l(w) */
-        I_EXTSH, I_EXTUH, /* I(ww) */
-        I_EXTSB, I_EXTUB, /* I(ww) */
-        I_EXTS, /* d(s) */
-        I_TRUNCD, /* s(d) */
-        I_STOSI, /* I(ss) */
-        I_STOUI, /* I(ss) */
-        I_DTOSI, /* I(dd) */
-        I_DTOUI, /* I(dd) */
-        I_SWTOF, /* F(ww) */
-        I_UWTOF, /* F(ww) */
-        I_SLTOF, /* F(ll) */
-        I_ULTOF, /* F(ll) */
-
-        I_CAST, /* wlsd(sdwl) */
-        I_COPY, /* T(T) */
-
-        I_CALL,
-
-        I_VASTART, /* (m) */
-        I_VAARG, /* T(mmmm) */
-
-        I_PHI,
-
-        I_JMP, /* 'jmp' @IDENT */
-        I_JNZ, /* 'jnz' VAL, @IDENT, @IDENT */
-        I_RET, /* 'ret' [VAL] */
-        I_HLT
+#define I(up,low) I_##up,
+#include "instr.inc"
+#undef I
+        I_END /* unused, required by C89 */
     };
-    uint8_t t;
+    uint32_t t:8;
+    uint32_t next_id:24;
     Type ret_t;
     Ident ident; /* optional */
+    uint32_t blit_sz; /* I_BLIT only */
     union {
-        union {
-            Value v;
-            Ident ident;
-        } arg[3];
+        Value args[2];
         struct {
             Value f;
-            uint16_t has_env_arg:1;
-            uint16_t args_len:15; /* includes env and varargs */
-            uint16_t has_vararg:1;
-            uint16_t varargs_len:15;
-            Value *args;
+            /* args[i] where i >= va_begin_idx are varargs.
+               when va_begin_idx >= len(args), no varargs are provided.
+               when va_begin_idx > len(args), called func is not varargs.*/
+            uint16_t va_begin_idx;
+            struct {
+                Type t;
+                Value v;
+            } *args; /* ends with TP_UNKNOWN */
         } call;
         struct {
             uint16_t args_len;
@@ -231,29 +157,31 @@ typedef struct Instr {
                 Value v;
             } *args;
         } phi;
+        struct {
+            Value v; /* jnz, ret */
+            Ident dst; /* jmp, jnz */
+            Ident dst_else; /* jnz */
+        } jump;
     } u;
-    uint32_t next_id;
 } Instr;
 
 typedef struct Block Block;
 struct Block {
     Ident ident;
-    uint32_t instr_id;
+    uint32_t instr_id; /* phi and regular instr chain */
+    uint32_t jump_id; /* not a chain; exactly one */
     uint16_t next_id;
 };
 
 typedef struct FuncDef {
     Linkage linkage;
     Type ret_t;
-    uint16_t params_len;
-    uint16_t params_cap;
     Ident ident;
     struct {
         Type t;
         Ident ident;
-    } *params;
-    uint8_t is_varargs:1;
-    uint8_t has_env_arg:1;
+    } *params; /* ends with TP_UNKNOWN */
+    uint8_t is_varargs;
     uint16_t blk_id;
     uint16_t next_id;
 } FuncDef;
@@ -264,6 +192,7 @@ const char *Ident_to_str(Ident);
 int Ident_eq(Ident, Ident);
 int Type_is_subty(Type);
 int Type_is_extty(Type);
+int Type_is_abity(Type);
 Type AgType_lookup_or_fail(Ident);
 Type AgType_lookup_or_alloc(Ident);
 AgType *AgType_get(Type);
@@ -273,6 +202,10 @@ DataDef *DataDef_get(uint16_t);
 uint16_t FuncDef_alloc(Ident);
 uint16_t FuncDef_lookup(Ident);
 FuncDef *FuncDef_get(uint16_t);
+uint16_t Block_alloc(void);
+Block *Block_get(uint16_t);
+uint32_t Instr_alloc(void);
+Instr *Instr_get(uint32_t);
 void ir_dump_typedef(void);
 void ir_dump_datadef(uint16_t);
 void ir_cleanup(void);
@@ -280,6 +213,7 @@ void ir_cleanup(void);
 /* parse.c */
 typedef struct ParseResult {
     uint16_t first_datadef_id;
+    uint16_t first_funcdef_id;
 } ParseResult;
 ParseResult parse(FILE *);
 

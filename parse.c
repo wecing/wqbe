@@ -63,6 +63,12 @@ static void expect_char(const char ex) {
     fail("char '%c' expected, got '%c'", ex, c);
 }
 
+static void expect_space_nl(void) {
+    skip_space();
+    expect_char('\n');
+    skip_space_nl(); /* NL could actually have multiple '\n' */
+}
+
 static uint64_t expect_number(void) {
     int c;
     uint64_t r = 0;
@@ -570,9 +576,288 @@ static uint16_t expect_datadef(Linkage linkage) {
     return dd_id;
 }
 
+/*
+ * expects '(' (PARAM), ')'
+ *
+ * PARAM :=
+ *     ABITY %IDENT  # Regular parameter
+ *   | 'env' %IDENT  # Environment parameter (first)
+ *   | '...'         # Variadic marker (last)
+ */
+static void expect_funcdef_params(FuncDef *fd) {
+    int i = 0, cap = 2;
+    int c = '\0'; /* \0: marker for first param */
+    fd->params = malloc(sizeof(fd->params[0]) * cap);
+    fd->is_varargs = 0;
+    expect_char('(');
+    skip_space();
+    while (c != ')') {
+        check(!fd->is_varargs, "no params expected after '...'");
+        skip_space();
+        if (_peekc() == 'e') {
+            check(c != '\0', "only the first param could be 'env'");
+            expect_keyword("env");
+            skip_space();
+            check(_peekc() == '%', "%IDENT expected");
+            fd->params[i].t.t = TP_NONE;
+            fd->params[i].ident = expect_ident();
+        } else if (_peekc() == '.') {
+            check(_getc() && _peekc() == '.' &&
+                  _getc() && _peekc() == '.' &&
+                  _getc() && _peekc() != '.',
+                  "'...' expected");
+            fd->is_varargs = 1;
+        } else {
+            fd->params[i].t = expect_type();
+            skip_space();
+            check(Type_is_abity(fd->params[i].t), "ABITY expected");
+            check(_peekc() == '%', "%IDENT expected");
+            fd->params[i].ident = expect_ident();
+        }
+        skip_space();
+
+        i++;
+        if (i == cap) {
+            cap += 2;
+            fd->params = realloc(fd->params, sizeof(fd->params[0]) * cap);
+        }
+
+        c = _getc();
+        check(c == ',' || c == ')', "',' or ')' expected in params list");
+        if (c == ',') { /* might be redundant comma ',)' */
+            skip_space();
+            if (_peekc() == ')') {
+                c = _getc();
+            }
+        }
+    }
+    fd->params[i].t.t = TP_UNKNOWN;
+}
+
+static uint8_t expect_instr_name(void) {
+    static const uint8_t t[] = {
+#define I(up,low) I_##up,
+#include "instr.inc"
+#undef I
+        0
+    };
+    static const char *s[] = {
+#define I(up,low) #low,
+#include "instr.inc"
+#undef I
+        0
+    };
+    int x = 0, y = countof(t) - 2; /* inclusive */
+    int i = 0;
+    char buf[10];
+    int c, cmp;
+
+    c = _getc();
+    while (isalnum(c) && i < (int) countof(buf) - 1) {
+        buf[i++] = c;
+        c = _getc();
+    }
+    buf[i] = '\0';
+    check(c == EOF || isspace(c), "unrecognized op: '%s%c...'", buf, c);
+
+    while (x <= y) {
+        i = (x + y) / 2;
+        cmp = strcmp(buf, s[i]);
+        if (cmp == 0) {
+            return t[i];
+        } else if (cmp < 0) {
+            y = i - 1;
+        } else {
+            x = i + 1;
+        }
+    }
+    fail("unrecognized op: '%s'", buf);
+    return I_UNKNOWN; /* unreachable */
+}
+
+/*
+ * expects (PHI | INST | JUMP) NL
+ *
+ * CALL := [%IDENT '=' ABITY] 'call' VAL '(' (ARG), ')'
+ *
+ * ARG :=
+ *     ABITY VAL  # Regular argument
+ *   | 'env' VAL  # Environment argument (first)
+ *   | '...'      # Variadic marker
+ *
+ * PHI := %IDENT '=' BASETY 'phi' ( @IDENT VAL ),
+ *
+ * other instructions, except JUMP:
+ *
+ * [%IDENT '=' ABITY] OPNAME VAL [, VAL] [, VAL]
+ */
+static uint32_t expect_instr(void) {
+    uint32_t id;
+    Instr *p;
+
+    id = Instr_alloc();
+    p = Instr_get(id);
+    if (_peekc() == '%') {
+        p->ident = expect_ident();
+        skip_space();
+        expect_char('=');
+        skip_space();
+        p->ret_t = expect_type();
+        check(Type_is_abity(p->ret_t), "ABITY expected for instr return type");
+        skip_space();
+    } else {
+        p->ret_t.t = TP_NONE;
+    }
+    p->t = expect_instr_name();
+    skip_space();
+    switch (p->t) {
+    case I_CALL:
+        fail("not implemented");
+        break; /* TODO */
+    case I_PHI:
+        fail("not implemented");
+        break; /* TODO */
+    case I_JMP:
+        skip_space();
+        check(_peekc() == '@', "@IDENT expected for jmp");
+        p->u.jump.dst = expect_ident();
+        break;
+    case I_JNZ:
+        p->u.jump.v = expect_value();
+        skip_space(); expect_char(','); skip_space();
+        check(_peekc() == '@', "@IDENT expected for jnz");
+        p->u.jump.dst = expect_ident();
+        skip_space(); expect_char(','); skip_space();
+        check(_peekc() == '@', "@IDENT expected for jnz");
+        p->u.jump.dst_else = expect_ident();
+        break;
+    case I_RET:
+        if (_peekc() != '\n') {
+            p->u.jump.v = expect_value();
+        } else {
+            p->u.jump.v.t = V_UNKNOWN;
+        }
+        break;
+    case I_HLT:
+        break;
+    case I_BLIT:
+        p->u.args[0] = expect_value();
+        skip_space(); expect_char(','); skip_space();
+        p->u.args[1] = expect_value();
+        skip_space(); expect_char(','); skip_space();
+        p->blit_sz = expect_number();
+        break;
+    default:
+        p->u.args[0] = expect_value();
+        skip_space();
+        if (_peekc() == ',') {
+            _getc();
+            skip_space();
+            p->u.args[1] = expect_value();
+        }
+    }
+    expect_space_nl();
+    return id;
+}
+
+/*
+ * BLOCK :=
+ *     @IDENT NL     # Block label
+ *     ( PHI NL )*   # Phi instructions
+ *     ( INST NL )*  # Regular instructions
+ *     JUMP NL       # Jump or return
+ *
+ * The last JUMP is actually optional.
+ */
+static uint16_t expect_block(void) {
+    uint16_t blk_id;
+    Block *blk;
+    uint32_t instr_id, last_instr_id = 0;
+    Instr *instr;
+    int seen_non_phi = 0;
+    int seen_jump = 0;
+
+    blk_id = Block_alloc();
+    blk = Block_get(blk_id);
+    check(_peekc() == '@', "@IDENT expected for BLOCK");
+    blk->ident = expect_ident();
+    blk->instr_id = 0;
+    blk->jump_id = 0;
+    expect_space_nl();
+    while (_peekc() != '@' && _peekc() != '}') {
+        check(!seen_jump, "at most one JUMP expected in BLOCK");
+        instr_id = expect_instr();
+        instr = Instr_get(instr_id);
+        switch (instr->t) {
+        case I_PHI:
+            check(!seen_non_phi, "PHI must only appear at beginning of BLOCK");
+            if (!blk->instr_id)
+                blk->instr_id = instr_id;
+            else
+                Instr_get(last_instr_id)->next_id = instr_id;
+            break;
+        case I_JMP: case I_JNZ: case I_RET: case I_HLT:
+            seen_non_phi = 1;
+            seen_jump = 1;
+            blk->jump_id = instr_id;
+            break;
+        default:
+            if (!blk->instr_id)
+                blk->instr_id = instr_id;
+            else
+                Instr_get(last_instr_id)->next_id = instr_id;
+            seen_non_phi = 1;
+        }
+        last_instr_id = instr_id; /* JUMP instr's next_id won't be set */
+    }
+    return blk_id;
+}
+
+/*
+ * FUNCDEF :=
+ *     LINKAGE*
+ *     'function' [ABITY] $IDENT '(' (PARAM), ')' [NL]
+ *     '{' NL
+ *         BLOCK+
+ *     '}'
+ */
+static uint16_t expect_funcdef(Linkage linkage) {
+    uint16_t id, blk_id, next_blk_id;
+    FuncDef *fd;
+    Type tp;
+    expect_keyword("function");
+    skip_space();
+    if (_peekc() != '$') {
+        tp = expect_type();
+        skip_space();
+        check(Type_is_abity(tp), "[ABITY] expected for FUNCDEF return type");
+    } else {
+        tp.t = TP_NONE;
+    }
+    id = FuncDef_alloc(expect_ident());
+    fd = FuncDef_get(id);
+    fd->linkage = linkage;
+    fd->ret_t = tp;
+    expect_funcdef_params(fd);
+    skip_space_nl();
+    expect_char('{');
+    expect_space_nl();
+    check(_peekc() == '@', "@IDENT NL expected");
+    blk_id = expect_block();
+    fd->blk_id = blk_id;
+    while (_peekc() == '@') {
+        Block_get(blk_id)->next_id = next_blk_id = expect_block();
+        blk_id = next_blk_id;
+    }
+    expect_char('}');
+    Block_get(blk_id)->next_id = 0;
+    return id;
+}
+
 ParseResult parse(FILE *_input) {
     ParseResult r = {0};
     uint16_t cur_dd = 0, dd = 0;
+    uint16_t cur_fd = 0, fd = 0;
     Linkage linkage;
     input = _input;
 
@@ -597,8 +882,13 @@ TAIL_CALL:
             cur_dd = dd;
             goto TAIL_CALL;
         case 'f': /* 'function' */
-            /* TODO: funcdef parsing */
-            fail("funcdef parsing not implemented");
+            fd = expect_funcdef(linkage);
+            if (cur_fd) {
+                FuncDef_get(cur_fd)->next_id = fd;
+            } else {
+                r.first_funcdef_id = fd;
+            }
+            cur_fd = fd;
             goto TAIL_CALL;
         default:
             fail("unexpected global definition");
@@ -607,5 +897,6 @@ TAIL_CALL:
 
     /* TODO: fix AgType size and log_align */
     /* TODO: fix DataDef log_align */
+    /* TODO: fix Block implicit jmp */
     return r;
 }

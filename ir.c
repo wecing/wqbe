@@ -18,13 +18,13 @@ static int next_ag_id = 1;
 static DataDef data_def_pool[1024]; /* 40 KB */
 static int next_data_def_id = 1;
 
-static Instr instr_pool[1024]; /* 72 KB */
+static Instr instr_pool[1024]; /* 48 KB */
 static int next_instr_id = 1;
 
-static Block blk_pool[1024]; /* 12 KB */
+static Block blk_pool[1024]; /* 16 KB */
 static int next_blk_id = 1;
 
-static FuncDef func_def_pool[1024]; /* 56 KB */
+static FuncDef func_def_pool[1024]; /* 48 KB */
 static int next_func_def_id = 1;
 
 /* djb2 hashing */
@@ -92,6 +92,16 @@ int Type_is_extty(Type t) {
     switch (t.t) {
     case TP_W: case TP_L: case TP_S: case TP_D:
     case TP_B: case TP_H:
+        return 1;
+    }
+    return 0;
+}
+
+int Type_is_abity(Type t) {
+    switch (t.t) {
+    case TP_W: case TP_L: case TP_S: case TP_D:
+    case TP_SB: case TP_UB: case TP_SH: case TP_UH:
+    case TP_AG:
         return 1;
     }
     return 0;
@@ -175,6 +185,28 @@ FuncDef *FuncDef_get(uint16_t id) {
     if (id == 0) return 0;
     assert((int) id < next_func_def_id);
     return &func_def_pool[id];
+}
+
+uint16_t Block_alloc(void) {
+    assert((uint64_t) next_blk_id < countof(blk_pool));
+    return next_blk_id++;
+}
+
+Block *Block_get(uint16_t id) {
+    if (id == 0) return 0;
+    assert((int) id < next_blk_id);
+    return &blk_pool[id];
+}
+
+uint32_t Instr_alloc(void) {
+    assert((uint64_t) next_instr_id < countof(instr_pool));
+    return next_instr_id++;
+}
+
+Instr *Instr_get(uint32_t id) {
+    if (id == 0) return 0;
+    assert((int) id < next_instr_id);
+    return &instr_pool[id];
 }
 
 static void dump_type(Type t) {
@@ -399,10 +431,6 @@ static void FuncDef_cleanup(void) {
 }
 
 void ir_cleanup(void) {
-    /* TODO: parse blocks and remove */
-    (void)blk_pool;
-    (void)next_blk_id;
-
     FuncDef_cleanup();
     Instr_cleanup();
     DataDef_cleanup();

@@ -14,7 +14,7 @@ wqbe: $(OBJ)
 .c.o:
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ): all.h
+$(OBJ): all.h instr.inc
 
 clean:
 	rm -f *.o wqbe

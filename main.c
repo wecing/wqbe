@@ -11,9 +11,9 @@ int main(int argc, char *argv[]) {
     assert(sizeof(ArrType) == 8);
     assert(sizeof(AgType) == 16);
     assert(sizeof(DataDef) == 40);
-    assert(sizeof(Block) == 12);
-    assert(sizeof(FuncDef) == 56);
-    assert(sizeof(Instr) == 72);
+    assert(sizeof(Block) == 16);
+    assert(sizeof(FuncDef) == 48);
+    assert(sizeof(Instr) == 48);
 
     if (argc != 2) {
         fprintf(stderr, "usage: wqbe INPUT\n");
