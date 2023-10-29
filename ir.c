@@ -308,7 +308,8 @@ void ir_dump_datadef(uint16_t id) {
     while (id) {
         dd = DataDef_get(id);
         dump_linkage(dd->linkage);
-        printf("%s = align %d {", Ident_to_str(dd->ident), 1 << dd->log_align);
+        printf("data %s = align %d {",
+               Ident_to_str(dd->ident), 1 << dd->log_align);
         assert(dd->items);
         for (i = 0; !dd->items[i].is_dummy_item; ++i) {
             if (dd->items[i].is_ext_ty) {
@@ -339,6 +340,124 @@ void ir_dump_datadef(uint16_t id) {
         }
         printf(" }\n");
         id = dd->next_id;
+    }
+}
+
+static void dump_instr_single(uint32_t id) {
+    Instr *p;
+    Ident empty_ident = {0};
+    static const char *s[] = {
+        0,
+#define I(up,low) #low,
+#include "instr.inc"
+#undef I
+        0
+    };
+
+    p = Instr_get(id);
+    switch (p->t) {
+    case I_CALL: fail("not implemented"); break; /* TODO */
+    case I_PHI: fail("not implemented"); break; /* TODO */
+    case I_JMP:
+        printf("jmp %s", Ident_to_str(p->u.jump.dst));
+        break;
+    case I_JNZ:
+        printf("jnz ");
+        dump_value(p->u.jump.v);
+        printf(", %s, %s",
+               Ident_to_str(p->u.jump.dst),
+               Ident_to_str(p->u.jump.dst_else));
+        break;
+    case I_RET:
+        printf("ret");
+        if (p->u.jump.v.t != V_UNKNOWN) {
+            printf(" ");
+            dump_value(p->u.jump.v);
+        }
+        break;
+    case I_HLT:
+        printf("hlt");
+        break;
+    case I_BLIT:
+        printf("blit ");
+        dump_value(p->u.args[0]);
+        printf(", ");
+        dump_value(p->u.args[1]);
+        printf(", %u", p->blit_sz);
+        break;
+    default:
+        check(I_UNKNOWN < p->t && p->t < I_END,
+              "unrecognized INSTR type: %d", p->t);
+        if (!Ident_eq(p->ident, empty_ident)) {
+            printf("%s =", Ident_to_str(p->ident));
+            dump_type(p->ret_t);
+            printf(" ");
+        }
+        printf("%s ", s[p->t]);
+        dump_value(p->u.args[0]);
+        if (p->u.args[1].t != V_UNKNOWN) {
+            printf(", ");
+            dump_value(p->u.args[1]);
+        }
+    }
+    printf("\n");
+}
+
+static void dump_block(uint16_t id) {
+    Block *blk;
+    uint32_t instr_id;
+
+    while (id) {
+        blk = Block_get(id);
+        printf("%s\n", Ident_to_str(blk->ident));
+        instr_id = blk->instr_id;
+        while (instr_id) {
+            printf("    ");
+            dump_instr_single(instr_id);
+            instr_id = Instr_get(instr_id)->next_id;
+        }
+        if (blk->jump_id) {
+            printf("    ");
+            dump_instr_single(blk->jump_id);
+        }
+        id = blk->next_id;
+    }
+}
+
+void ir_dump_funcdef(uint16_t id) {
+    int i;
+    FuncDef *fd;
+
+    while (id) {
+        fd = FuncDef_get(id);
+        dump_linkage(fd->linkage);
+        printf("function ");
+        if (fd->ret_t.t != TP_NONE) {
+            dump_type(fd->ret_t);
+            printf(" ");
+        }
+        printf("%s(", Ident_to_str(fd->ident));
+        for (i = 0; fd->params[i].t.t != TP_UNKNOWN; ++i) {
+            if (i != 0) {
+                printf(", ");
+            }
+            if (fd->params[i].t.t == TP_NONE) {
+                printf("env");
+            } else {
+                dump_type(fd->params[i].t);
+            }
+            printf(" %s", Ident_to_str(fd->params[i].ident));
+        }
+        if (fd->is_varargs) {
+            if (fd->params[0].t.t != TP_UNKNOWN) {
+                printf(", ");
+            }
+            printf("...");
+        }
+        printf(") {\n");
+        dump_block(fd->blk_id);
+        printf("}\n");
+        id = fd->next_id;
     }
 }
 

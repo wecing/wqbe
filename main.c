@@ -33,6 +33,7 @@ int main(int argc, char *argv[]) {
 
     ir_dump_typedef();
     ir_dump_datadef(ir.first_datadef_id);
+    ir_dump_funcdef(ir.first_funcdef_id);
 
     ir_cleanup();
     return 0;

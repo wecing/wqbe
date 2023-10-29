@@ -7,19 +7,7 @@
 static FILE *input;
 
 static int _getc(void) {
-#if 0
-    int c = fgetc(input);
-    if (c == EOF) {
-        printf(">> EOF\n");
-    } else if (c == '\n') {
-        printf(">> '\\n'\n");
-    } else {
-        printf(">> '%c'\n", c);
-    }
-    return c;
-#else
     return fgetc(input);
-#endif
 }
 
 static void _ungetc(int c) {

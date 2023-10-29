@@ -130,7 +130,7 @@ typedef struct Instr {
 #define I(up,low) I_##up,
 #include "instr.inc"
 #undef I
-        I_END /* unused, required by C89 */
+        I_END
     };
     uint32_t t:8;
     uint32_t next_id:24;
@@ -208,6 +208,7 @@ uint32_t Instr_alloc(void);
 Instr *Instr_get(uint32_t);
 void ir_dump_typedef(void);
 void ir_dump_datadef(uint16_t);
+void ir_dump_funcdef(uint16_t);
 void ir_cleanup(void);
 
 /* parse.c */
