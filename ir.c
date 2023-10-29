@@ -289,8 +289,8 @@ static void dump_linkage(Linkage v) {
 static void dump_value(Value v) {
     switch (v.t) {
     case V_CI: printf("%llu", v.u.u64); break;
-    case V_CS: printf("%f", v.u.s); break;
-    case V_CD: printf("%lf", v.u.d); break;
+    case V_CS: printf("s_%f", v.u.s); break;
+    case V_CD: printf("d_%lf", v.u.d); break;
     case V_CSYM: case V_CTHS: case V_TMP:
         /* doesn't matter which _ident we use */
         printf("%s", Ident_to_str(v.u.global_ident));
@@ -344,6 +344,7 @@ void ir_dump_datadef(uint16_t id) {
 }
 
 static void dump_instr_single(uint32_t id) {
+    int i;
     Instr *p;
     Ident empty_ident = {0};
     static const char *s[] = {
@@ -356,8 +357,43 @@ static void dump_instr_single(uint32_t id) {
 
     p = Instr_get(id);
     switch (p->t) {
-    case I_CALL: fail("not implemented"); break; /* TODO */
-    case I_PHI: fail("not implemented"); break; /* TODO */
+    case I_CALL:
+        if (p->ret_t.t != TP_NONE) {
+            printf("%s =", Ident_to_str(p->ident));
+        }
+        dump_type(p->ret_t);
+        printf(" call ");
+        dump_value(p->u.call.f);
+        printf("(");
+        for (i = 0; p->u.call.args[i].t.t != TP_UNKNOWN; ++i) {
+            if (i != 0) printf(", ");
+            if (i == p->u.call.va_begin_idx) printf("..., ");
+            if (p->u.call.args[i].t.t == TP_NONE) {
+                check(i == 0, "only first arg may be 'env'");
+                printf("env ");
+            } else {
+                dump_type(p->u.call.args[i].t);
+                printf(" ");
+            }
+            dump_value(p->u.call.args[i].v);
+        }
+        /* called func is varargs, but no varargs are provided */
+        if (p->u.call.va_begin_idx == i)
+            printf("%s...", i == 0 ? "" : ", ");
+        printf(")");
+        break;
+    case I_PHI:
+        printf("%s =", Ident_to_str(p->ident));
+        dump_type(p->ret_t);
+        printf(" phi");
+        for (i = 0; p->u.phi.args[i].v.t != V_UNKNOWN; ++i) {
+            if (i != 0) {
+                printf(",");
+            }
+            printf(" %s ", Ident_to_str(p->u.phi.args[i].ident));
+            dump_value(p->u.phi.args[i].v);
+        }
+        break;
     case I_JMP:
         printf("jmp %s", Ident_to_str(p->u.jump.dst));
         break;

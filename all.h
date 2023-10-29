@@ -151,11 +151,10 @@ typedef struct Instr {
             } *args; /* ends with TP_UNKNOWN */
         } call;
         struct {
-            uint16_t args_len;
             struct {
                 Ident ident;
                 Value v;
-            } *args;
+            } *args; /* ends with V_UNKNOWN */
         } phi;
         struct {
             Value v; /* jnz, ret */

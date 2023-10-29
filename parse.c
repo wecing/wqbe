@@ -347,6 +347,7 @@ static double expect_fp(int is_f32) {
     char buf[30];
     float f;
     double d;
+    int n = 0;
     c = _getc();
     check(c == 's' || c == 'd', "FP should begin with 's_' or 'd_'");
     expect_char('_');
@@ -354,15 +355,18 @@ static double expect_fp(int is_f32) {
     while (i < (int) sizeof(buf)
            && (isalnum(c) || c == '.' || c == '+' || c == '-')) {
         buf[i++] = c;
+        c = _getc();
     }
     if (c != EOF) _ungetc(c);
     assert(i < (int) sizeof(buf));
     buf[i] = '\0';
     if (is_f32) {
-        check(sscanf(buf, "%f", &f) == i, "illegal FP: s_%s", buf);
+        sscanf(buf, "%f%n", &f, &n);
+        check(n > 0 && n == i, "illegal FP: s_%s", buf);
         return (double) f;
     } else {
-        check(sscanf(buf, "%lf", &d) == i, "illegal FP: d_%s", buf);
+        sscanf(buf, "%lf%n", &d, &n);
+        check(n > 0 && n == i, "illegal FP: d_%s; n=%d, i=%d", buf, n, i);
         return d;
     }
 }
@@ -579,6 +583,7 @@ static void expect_funcdef_params(FuncDef *fd) {
     fd->is_varargs = 0;
     expect_char('(');
     skip_space();
+    if (_peekc() == ')') c = _getc(); /* '(' ')' */
     while (c != ')') {
         check(!fd->is_varargs, "no params expected after '...'");
         skip_space();
@@ -612,12 +617,7 @@ static void expect_funcdef_params(FuncDef *fd) {
 
         c = _getc();
         check(c == ',' || c == ')', "',' or ')' expected in params list");
-        if (c == ',') { /* might be redundant comma ',)' */
-            skip_space();
-            if (_peekc() == ')') {
-                c = _getc();
-            }
-        }
+        /* no redundant comma ',)' */
     }
     fd->params[i].t.t = TP_UNKNOWN;
 }
@@ -647,6 +647,7 @@ static uint8_t expect_instr_name(void) {
     }
     buf[i] = '\0';
     check(c == EOF || isspace(c), "unrecognized op: '%s%c...'", buf, c);
+    if (c != EOF) _ungetc(c);
 
     while (x <= y) {
         i = (x + y) / 2;
@@ -664,24 +665,72 @@ static uint8_t expect_instr_name(void) {
 }
 
 /*
- * expects (PHI | INST | JUMP) NL
- *
- * CALL := [%IDENT '=' ABITY] 'call' VAL '(' (ARG), ')'
+ * expects '(' (ARG), ')'
  *
  * ARG :=
  *     ABITY VAL  # Regular argument
  *   | 'env' VAL  # Environment argument (first)
  *   | '...'      # Variadic marker
+ */
+static void expect_call_args(Instr *p) {
+    int c = '(';
+    int i = 0, cap = 4;
+
+    p->u.call.args = malloc(sizeof(p->u.call.args[0]) * cap);
+    p->u.call.va_begin_idx = 0xFFFF;
+    expect_char('(');
+    while (c == '(' || c == ',') {
+        skip_space();
+        if (_peekc() == 'e' && i == 0) {
+            expect_keyword("env");
+            skip_space();
+            p->u.call.args[i].t.t = TP_NONE;
+            p->u.call.args[i].v = expect_value();
+            i++;
+        } else if (_peekc() == '.') {
+            check(_getc() && _peekc() == '.' &&
+                  _getc() && _peekc() == '.' &&
+                  _getc() && _peekc() != '.',
+                  "variadic marker '...' expected");
+            p->u.call.va_begin_idx = i;
+            /* no i++ */
+        } else {
+            p->u.call.args[i].t = expect_type();
+            check(Type_is_abity(p->u.call.args[i].t), "ABITY expected");
+            skip_space();
+            p->u.call.args[i].v = expect_value();
+            i++;
+        }
+
+        if (i == cap) {
+            cap += 4;
+            p->u.call.args = realloc(p->u.call.args,
+                                     sizeof(p->u.call.args[0]) * cap);
+        }
+
+        skip_space();
+        c = _getc();
+    }
+    p->u.call.args[i].t.t = TP_UNKNOWN;
+    check(c == ')', "ARG list must be termined by ')'");
+    return;
+}
+
+/*
+ * expects (PHI | INST | JUMP) NL
  *
+ * CALL := [%IDENT '=' ABITY] 'call' VAL '(' (ARG), ')'
  * PHI := %IDENT '=' BASETY 'phi' ( @IDENT VAL ),
  *
- * other instructions, except JUMP:
+ * other instructions, except JUMP and BLIT:
  *
- * [%IDENT '=' ABITY] OPNAME VAL [, VAL] [, VAL]
+ * [%IDENT '=' ABITY] OPNAME VAL [, VAL]
  */
 static uint32_t expect_instr(void) {
     uint32_t id;
     Instr *p;
+    int i, args_cap;
+    int c;
 
     id = Instr_alloc();
     p = Instr_get(id);
@@ -700,13 +749,38 @@ static uint32_t expect_instr(void) {
     skip_space();
     switch (p->t) {
     case I_CALL:
-        fail("not implemented");
-        break; /* TODO */
-    case I_PHI:
-        fail("not implemented");
-        break; /* TODO */
-    case I_JMP:
+        p->u.call.f = expect_value();
         skip_space();
+        expect_call_args(p);
+        break;
+    case I_PHI:
+        i = 0;
+        args_cap = 4;
+        p->u.phi.args = malloc(sizeof(p->u.phi.args[0]) * args_cap);
+        c = ',';
+        while (c == ',') {
+            skip_space();
+            check(_peekc() == '@', "@IDENT expected");
+            p->u.phi.args[i].ident = expect_ident();
+            skip_space();
+            p->u.phi.args[i].v = expect_value();
+
+            i++;
+            if (i == args_cap) {
+                args_cap += 4;
+                p->u.phi.args = realloc(p->u.phi.args,
+                                        sizeof(p->u.phi.args[0]) * args_cap);
+            }
+
+            skip_space();
+            c = _peekc();
+            if (c == ',') {
+                _getc();
+            }
+        }
+        p->u.phi.args[i].v.t = V_UNKNOWN;
+        break;
+    case I_JMP:
         check(_peekc() == '@', "@IDENT expected for jmp");
         p->u.jump.dst = expect_ident();
         break;
