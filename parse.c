@@ -679,6 +679,8 @@ static void expect_call_args(Instr *p) {
     p->u.call.args = malloc(sizeof(p->u.call.args[0]) * cap);
     p->u.call.va_begin_idx = 0xFFFF;
     expect_char('(');
+    skip_space();
+    if (_peekc() == ')') c = _getc();
     while (c == '(' || c == ',') {
         skip_space();
         if (_peekc() == 'e' && i == 0) {
