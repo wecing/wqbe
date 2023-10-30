@@ -107,6 +107,81 @@ int Type_is_abity(Type t) {
     return 0;
 }
 
+uint8_t _max_u8(uint8_t x, uint8_t y) {
+    if (x > y) return x;
+    return y;
+}
+
+uint8_t Type_log_align(Type t) {
+    AgType *ag;
+    int i, j;
+    uint8_t max_r = 0;
+    /* 1 byte => 0; 2 bytes => 1; 4 bytes => 2; 8 bytes => 3 */
+    switch (t.t) {
+    case TP_B: case TP_SB: case TP_UB: return 0;
+    case TP_H: case TP_SH: case TP_UH: return 1;
+    case TP_W: case TP_S: return 2;
+    case TP_L: case TP_D: return 3;
+    case TP_AG:
+        ag = &ag_type_pool[t.ag_id];
+        if (ag->log_align != 0x7) {
+            return ag->log_align;
+        }
+        if (ag->is_union) {
+            for (i = 0; ag->u.ub[i] != 0; ++i)
+                for (j = 0; ag->u.ub[i][j].t.t != TP_UNKNOWN; ++j)
+                    max_r = _max_u8(max_r, Type_log_align(ag->u.ub[i][j].t));
+            return max_r;
+        }
+        for (i = 0; ag->u.sb[i].t.t != TP_UNKNOWN; ++i) {
+            max_r = _max_u8(max_r, Type_log_align(ag->u.sb[i].t));
+        }
+        return max_r;
+    case TP_NONE:
+        fail("TP_NONE has no align");
+        return 0xFF; /* unreachable */
+    }
+    fail("unrecognized TYPE");
+    return 0xFF; /* unreachable */
+}
+
+uint32_t Type_size(Type t) {
+    AgType *ag;
+    int i, j;
+    uint32_t s_sz;
+    uint32_t r = 0;
+    switch (t.t) {
+    case TP_B: case TP_SB: case TP_UB: return 1;
+    case TP_H: case TP_SH: case TP_UH: return 2;
+    case TP_W: case TP_S: return 4;
+    case TP_L: case TP_D: return 8;
+    case TP_AG:
+        ag = &ag_type_pool[t.ag_id];
+        if (ag->size != 0) {
+            return ag->size;
+        }
+        if (ag->is_union) {
+            for (i = 0; ag->u.ub[i] != 0; ++i) {
+                s_sz = 0;
+                for (j = 0; ag->u.ub[i][j].t.t != TP_UNKNOWN; ++j) {
+                    s_sz += Type_size(ag->u.ub[i][j].t) * ag->u.ub[i][j].count;
+                }
+                r = r > s_sz ? r : s_sz;
+            }
+            return r;
+        }
+        for (i = 0; ag->u.sb[i].t.t != TP_UNKNOWN; ++i) {
+            r += Type_size(ag->u.sb[i].t) * ag->u.sb[i].count;
+        }
+        return r;
+    case TP_NONE:
+        fail("TP_NONE has no size");
+        return 0; /* unreachable */
+    }
+    fail("unrecognized TYPE");
+    return 0; /* unreachable */
+}
+
 Type AgType_lookup_or_fail(Ident ident) {
     int prev = next_ag_id;
     Type t = AgType_lookup_or_alloc(ident);
@@ -207,6 +282,25 @@ Instr *Instr_get(uint32_t id) {
     if (id == 0) return 0;
     assert((int) id < next_instr_id);
     return &instr_pool[id];
+}
+
+void ir_fix_typedef_size_align(void) {
+    int i;
+    Type t;
+    AgType *ag;
+
+    t.t = TP_AG;
+    for (i = 1; i < next_ag_id; ++i) {
+        t.ag_id = i;
+        ag = AgType_get(t);
+        if (ag->is_opaque) continue; /* already known */
+        if (ag->log_align == 0x7) {
+            ag->log_align = Type_log_align(t);
+        }
+        ag->size = Type_size(t);
+        check(ag->log_align != 0x7, "log_align=7 reserved");
+        check(ag->size > 0, "type size cannot be 0");
+    }
 }
 
 static void dump_type(Type t) {

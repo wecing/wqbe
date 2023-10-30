@@ -241,6 +241,7 @@ static void expect_typedef(void) {
     skip_space();
     expect_char('=');
     skip_space();
+    ag->log_align = 0x7;
     if (_peekc() == 'a') {
         expect_keyword("align");
         has_align = 1;
@@ -950,6 +951,7 @@ TAIL_CALL:
     case 't':
         _getc();
         if (_peekc() == 'y') { /* 'type' */
+            _ungetc('t');
             expect_typedef();
             goto TAIL_CALL;
         }
@@ -982,6 +984,6 @@ TAIL_CALL:
         }
     }
 
-    /* TODO: fix AgType size and log_align */
+    ir_fix_typedef_size_align();
     return r;
 }

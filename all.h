@@ -68,7 +68,7 @@ typedef struct ArrType {
 } ArrType;
 
 typedef struct AgType {
-    uint32_t log_align:3; /* max align 1<<7 == 128 */
+    uint32_t log_align:3; /* max align 1<<7 == 128 reserved for unspecified */
     uint32_t is_opaque:1;
     uint32_t is_union:1;
     uint32_t size:27;
@@ -196,6 +196,8 @@ int Ident_eq(Ident, Ident);
 int Type_is_subty(Type);
 int Type_is_extty(Type);
 int Type_is_abity(Type);
+uint8_t Type_log_align(Type);
+uint32_t Type_size(Type);
 Type AgType_lookup_or_fail(Ident);
 Type AgType_lookup_or_alloc(Ident);
 AgType *AgType_get(Type);
@@ -209,6 +211,7 @@ uint16_t Block_alloc(void);
 Block *Block_get(uint16_t);
 uint32_t Instr_alloc(void);
 Instr *Instr_get(uint32_t);
+void ir_fix_typedef_size_align(void);
 void ir_dump_typedef(void);
 void ir_dump_datadef(uint16_t);
 void ir_dump_funcdef(uint16_t);
