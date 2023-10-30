@@ -887,6 +887,8 @@ static uint16_t expect_funcdef(Linkage linkage) {
     uint16_t id, blk_id, next_blk_id;
     FuncDef *fd;
     Type tp;
+    Block *blk;
+    Instr *instr;
     expect_keyword("function");
     skip_space();
     if (_peekc() != '$') {
@@ -913,6 +915,21 @@ static uint16_t expect_funcdef(Linkage linkage) {
     }
     expect_char('}');
     Block_get(blk_id)->next_id = 0;
+
+    /* fix Block implicit jmp */
+    blk_id = fd->blk_id;
+    while (blk_id != 0) {
+        blk = Block_get(blk_id);
+        if (blk->jump_id == 0) {
+            check(blk->next_id != 0, "implicit jump with no successor");
+            blk->jump_id = Instr_alloc();
+            instr = Instr_get(blk->jump_id);
+            instr->t = I_JMP;
+            instr->ret_t.t = TP_UNKNOWN;
+            instr->u.jump.dst = Block_get(blk->next_id)->ident;
+        }
+        blk_id = blk->next_id;
+    }
     return id;
 }
 
@@ -959,6 +976,5 @@ TAIL_CALL:
 
     /* TODO: fix AgType size and log_align */
     /* TODO: fix DataDef log_align */
-    /* TODO: fix Block implicit jmp */
     return r;
 }
