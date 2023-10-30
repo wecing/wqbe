@@ -119,6 +119,10 @@ typedef struct DataDefItem {
 typedef struct DataDef {
     Linkage linkage;
     Ident ident;
+    /* log_align is optional; 0xFF == not provided.
+       From QBE spec:
+           when no alignment is provided, the maximum alignment
+           from the platform is used. */
     uint8_t log_align;
     uint16_t next_id;
     DataDefItem *items; /* ends with is_dummy_item */

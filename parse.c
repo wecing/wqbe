@@ -549,6 +549,7 @@ static uint16_t expect_datadef(Linkage linkage) {
     skip_space();
     expect_char('=');
     skip_space();
+    dd->log_align = 0xFF; /* not specified */
     if (_peekc() == 'a') {
         expect_keyword("align");
         skip_space();
@@ -946,9 +947,14 @@ TAIL_CALL:
     skip_space_nl();
     switch (_peekc()) {
     case EOF: break;
-    case 't': /* 'type' */
-        expect_typedef();
-        goto TAIL_CALL;
+    case 't':
+        _getc();
+        if (_peekc() == 'y') { /* 'type' */
+            expect_typedef();
+            goto TAIL_CALL;
+        }
+        _ungetc('t'); /* could also be 'thread' */
+        /* fallthrough */
     default:
         linkage = expect_linkage();
         skip_space();
@@ -977,6 +983,5 @@ TAIL_CALL:
     }
 
     /* TODO: fix AgType size and log_align */
-    /* TODO: fix DataDef log_align */
     return r;
 }

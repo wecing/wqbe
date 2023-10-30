@@ -308,8 +308,11 @@ void ir_dump_datadef(uint16_t id) {
     while (id) {
         dd = DataDef_get(id);
         dump_linkage(dd->linkage);
-        printf("data %s = align %d {",
-               Ident_to_str(dd->ident), 1 << dd->log_align);
+        printf("data %s = ", Ident_to_str(dd->ident));
+        if (dd->log_align != 0xFF) {
+            printf("align %d ", 1 << dd->log_align);
+        }
+        printf("{");
         assert(dd->items);
         for (i = 0; !dd->items[i].is_dummy_item; ++i) {
             if (dd->items[i].is_ext_ty) {
