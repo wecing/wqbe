@@ -284,25 +284,6 @@ Instr *Instr_get(uint32_t id) {
     return &instr_pool[id];
 }
 
-void ir_fix_typedef_size_align(void) {
-    int i;
-    Type t;
-    AgType *ag;
-
-    t.t = TP_AG;
-    for (i = 1; i < next_ag_id; ++i) {
-        t.ag_id = i;
-        ag = AgType_get(t);
-        if (ag->is_opaque) continue; /* already known */
-        if (ag->log_align == 0x7) {
-            ag->log_align = Type_log_align(t);
-        }
-        ag->size = Type_size(t);
-        check(ag->log_align != 0x7, "log_align=7 reserved");
-        check(ag->size > 0, "type size cannot be 0");
-    }
-}
-
 static void dump_type(Type t) {
     switch (t.t) {
     case TP_W: printf("w"); break;
@@ -322,6 +303,133 @@ static void dump_type(Type t) {
         break;
     default:
         fail("unrecognized TYPE kind: %d", t.t);
+    }
+}
+
+static void dump_value(Value v) {
+    switch (v.t) {
+    case V_CI: printf("%llu", v.u.u64); break;
+    case V_CS: printf("s_%f", v.u.s); break;
+    case V_CD: printf("d_%lf", v.u.d); break;
+    case V_CSYM: case V_CTHS: case V_TMP:
+        /* doesn't matter which _ident we use */
+        printf("%s", Ident_to_str(v.u.global_ident));
+        break;
+    default:
+        fail("unrecognized Value type: %d", v.t);
+    }
+}
+
+void Instr_dump(Instr p) {
+    int i;
+    Ident empty_ident = {0};
+    static const char *s[] = {
+        0,
+#define I(up,low) #low,
+#include "instr.inc"
+#undef I
+        0
+    };
+
+    switch (p.t) {
+    case I_CALL:
+        if (p.ret_t.t != TP_NONE) {
+            printf("%s =", Ident_to_str(p.ident));
+            dump_type(p.ret_t);
+            printf(" ");
+        }
+        printf("call ");
+        dump_value(p.u.call.f);
+        printf("(");
+        for (i = 0; p.u.call.args[i].t.t != TP_UNKNOWN; ++i) {
+            if (i != 0) printf(", ");
+            if (i == p.u.call.va_begin_idx) printf("..., ");
+            if (p.u.call.args[i].t.t == TP_NONE) {
+                check(i == 0, "only first arg may be 'env'");
+                printf("env ");
+            } else {
+                dump_type(p.u.call.args[i].t);
+                printf(" ");
+            }
+            dump_value(p.u.call.args[i].v);
+        }
+        /* called func is varargs, but no varargs are provided */
+        if (p.u.call.va_begin_idx == i)
+            printf("%s...", i == 0 ? "" : ", ");
+        printf(")");
+        break;
+    case I_PHI:
+        printf("%s =", Ident_to_str(p.ident));
+        dump_type(p.ret_t);
+        printf(" phi");
+        for (i = 0; p.u.phi.args[i].v.t != V_UNKNOWN; ++i) {
+            if (i != 0) {
+                printf(",");
+            }
+            printf(" %s ", Ident_to_str(p.u.phi.args[i].ident));
+            dump_value(p.u.phi.args[i].v);
+        }
+        break;
+    case I_JMP:
+        printf("jmp %s", Ident_to_str(p.u.jump.dst));
+        break;
+    case I_JNZ:
+        printf("jnz ");
+        dump_value(p.u.jump.v);
+        printf(", %s, %s",
+               Ident_to_str(p.u.jump.dst),
+               Ident_to_str(p.u.jump.dst_else));
+        break;
+    case I_RET:
+        printf("ret");
+        if (p.u.jump.v.t != V_UNKNOWN) {
+            printf(" ");
+            dump_value(p.u.jump.v);
+        }
+        break;
+    case I_HLT:
+        printf("hlt");
+        break;
+    case I_BLIT:
+        printf("blit ");
+        dump_value(p.u.args[0]);
+        printf(", ");
+        dump_value(p.u.args[1]);
+        printf(", %u", p.blit_sz);
+        break;
+    default:
+        check(I_UNKNOWN < p.t && p.t < I_END,
+              "unrecognized INSTR type: %d", p.t);
+        if (!Ident_eq(p.ident, empty_ident)) {
+            printf("%s =", Ident_to_str(p.ident));
+            dump_type(p.ret_t);
+            printf(" ");
+        }
+        printf("%s ", s[p.t]);
+        dump_value(p.u.args[0]);
+        if (p.u.args[1].t != V_UNKNOWN) {
+            printf(", ");
+            dump_value(p.u.args[1]);
+        }
+    }
+}
+
+void ir_fix_typedef_size_align(void) {
+    int i;
+    Type t;
+    AgType *ag;
+
+    t.t = TP_AG;
+    for (i = 1; i < next_ag_id; ++i) {
+        t.ag_id = i;
+        ag = AgType_get(t);
+        if (ag->is_opaque) continue; /* already known */
+        if (ag->log_align == 0x7) {
+            ag->log_align = Type_log_align(t);
+        }
+        ag->size = Type_size(t);
+        check(ag->log_align != 0x7, "log_align=7 reserved");
+        check(ag->size > 0, "type size cannot be 0");
     }
 }
 
@@ -380,20 +488,6 @@ static void dump_linkage(Linkage v) {
     }
 }
 
-static void dump_value(Value v) {
-    switch (v.t) {
-    case V_CI: printf("%llu", v.u.u64); break;
-    case V_CS: printf("s_%f", v.u.s); break;
-    case V_CD: printf("d_%lf", v.u.d); break;
-    case V_CSYM: case V_CTHS: case V_TMP:
-        /* doesn't matter which _ident we use */
-        printf("%s", Ident_to_str(v.u.global_ident));
-        break;
-    default:
-        fail("unrecognized Value type: %d", v.t);
-    }
-}
-
 void ir_dump_datadef(uint16_t id) {
     DataDef *dd;
     DataItem *p;
@@ -441,98 +535,7 @@ void ir_dump_datadef(uint16_t id) {
 }
 
 static void dump_instr_single(uint32_t id) {
-    int i;
-    Instr *p;
-    Ident empty_ident = {0};
-    static const char *s[] = {
-        0,
-#define I(up,low) #low,
-#include "instr.inc"
-#undef I
-        0
-    };
-
-    p = Instr_get(id);
-    switch (p->t) {
-    case I_CALL:
-        if (p->ret_t.t != TP_NONE) {
-            printf("%s =", Ident_to_str(p->ident));
-        }
-        dump_type(p->ret_t);
-        printf(" call ");
-        dump_value(p->u.call.f);
-        printf("(");
-        for (i = 0; p->u.call.args[i].t.t != TP_UNKNOWN; ++i) {
-            if (i != 0) printf(", ");
-            if (i == p->u.call.va_begin_idx) printf("..., ");
-            if (p->u.call.args[i].t.t == TP_NONE) {
-                check(i == 0, "only first arg may be 'env'");
-                printf("env ");
-            } else {
-                dump_type(p->u.call.args[i].t);
-                printf(" ");
-            }
-            dump_value(p->u.call.args[i].v);
-        }
-        /* called func is varargs, but no varargs are provided */
-        if (p->u.call.va_begin_idx == i)
-            printf("%s...", i == 0 ? "" : ", ");
-        printf(")");
-        break;
-    case I_PHI:
-        printf("%s =", Ident_to_str(p->ident));
-        dump_type(p->ret_t);
-        printf(" phi");
-        for (i = 0; p->u.phi.args[i].v.t != V_UNKNOWN; ++i) {
-            if (i != 0) {
-                printf(",");
-            }
-            printf(" %s ", Ident_to_str(p->u.phi.args[i].ident));
-            dump_value(p->u.phi.args[i].v);
-        }
-        break;
-    case I_JMP:
-        printf("jmp %s", Ident_to_str(p->u.jump.dst));
-        break;
-    case I_JNZ:
-        printf("jnz ");
-        dump_value(p->u.jump.v);
-        printf(", %s, %s",
-               Ident_to_str(p->u.jump.dst),
-               Ident_to_str(p->u.jump.dst_else));
-        break;
-    case I_RET:
-        printf("ret");
-        if (p->u.jump.v.t != V_UNKNOWN) {
-            printf(" ");
-            dump_value(p->u.jump.v);
-        }
-        break;
-    case I_HLT:
-        printf("hlt");
-        break;
-    case I_BLIT:
-        printf("blit ");
-        dump_value(p->u.args[0]);
-        printf(", ");
-        dump_value(p->u.args[1]);
-        printf(", %u", p->blit_sz);
-        break;
-    default:
-        check(I_UNKNOWN < p->t && p->t < I_END,
-              "unrecognized INSTR type: %d", p->t);
-        if (!Ident_eq(p->ident, empty_ident)) {
-            printf("%s =", Ident_to_str(p->ident));
-            dump_type(p->ret_t);
-            printf(" ");
-        }
-        printf("%s ", s[p->t]);
-        dump_value(p->u.args[0]);
-        if (p->u.args[1].t != V_UNKNOWN) {
-            printf(", ");
-            dump_value(p->u.args[1]);
-        }
-    }
+    Instr_dump(*Instr_get(id));
     printf("\n");
 }
 

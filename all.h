@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #define countof(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -211,6 +210,7 @@ uint16_t Block_alloc(void);
 Block *Block_get(uint16_t);
 uint32_t Instr_alloc(void);
 Instr *Instr_get(uint32_t);
+void Instr_dump(Instr);
 void ir_fix_typedef_size_align(void);
 void ir_dump_typedef(void);
 void ir_dump_datadef(uint16_t);
@@ -227,3 +227,6 @@ ParseResult parse(FILE *);
 /* util.c */
 void check(int cond, const char *, ...); /* like assert(), but always enabled */
 void fail(const char *, ...);
+
+/* dephi.c */
+void dephi(FuncDef *);
