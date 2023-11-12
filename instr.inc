@@ -1,3 +1,4 @@
+/* keep sorted */
 I(ADD,add)
 I(ALLOC16,alloc16)
 I(ALLOC4,alloc4)

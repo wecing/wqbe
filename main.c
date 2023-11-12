@@ -23,6 +23,19 @@ static void run_all_fd(uint16_t id, void (*f)(FuncDef *)) {
     }
 }
 
+static void x64(FuncDef *fd) {
+    AsmFunc *af;
+    af = isel_simple_x64(fd);
+
+    printf("\n####################\n");
+    printf("### %s after isel_simple_x64()\n",
+           Ident_to_str(fd->ident));
+    printf("####################\n\n");
+    dump_x64(af);
+
+    /* TODO: reg alloc */
+}
+
 int main(int argc, char *argv[]) {
     FILE *f;
     int need_close = 0;
@@ -35,6 +48,8 @@ int main(int argc, char *argv[]) {
     assert(sizeof(Block) == 16);
     assert(sizeof(FuncDef) == 48);
     assert(sizeof(Instr) == 48);
+    assert(sizeof(AsmInstr) == 24);
+    assert(sizeof(((AsmFunc *) 0)->label[0]) == 8);
 
     if (argc != 2) {
         fprintf(stderr, "usage: wqbe INPUT\n");
@@ -45,6 +60,7 @@ int main(int argc, char *argv[]) {
         f = stdin;
     } else {
         f = fopen(argv[1], "r");
+        check(f != 0, "failed to open %s", argv[1]);
         need_close = 1;
     }
     ir = parse(f);
@@ -53,6 +69,8 @@ int main(int argc, char *argv[]) {
 
     run_all_fd(ir.first_funcdef_id, dephi);
     dump_all("after dephi()", ir);
+
+    run_all_fd(ir.first_funcdef_id, x64);
 
     ir_cleanup();
     return 0;

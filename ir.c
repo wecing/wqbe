@@ -156,6 +156,7 @@ uint32_t Type_size(Type t) {
     case TP_W: case TP_S: return 4;
     case TP_L: case TP_D: return 8;
     case TP_AG:
+        /* TODO: do not assume type is packed */
         ag = &ag_type_pool[t.ag_id];
         if (ag->size != 0) {
             return ag->size;

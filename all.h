@@ -8,7 +8,7 @@ typedef struct Ident {
     uint16_t idx; /* idx within slot */
 } Ident;
 
-/* all "_id" fields (e.g. instr_id, ag_id) mean null if set to 0 */
+/* IR: all "_id" fields (e.g. instr_id, ag_id) mean null if set to 0 */
 
 typedef struct Value {
     enum {
@@ -167,13 +167,12 @@ typedef struct Instr {
     } u;
 } Instr;
 
-typedef struct Block Block;
-struct Block {
+typedef struct Block {
     Ident ident;
     uint32_t instr_id; /* phi and regular instr chain */
     uint32_t jump_id; /* not a chain; exactly one */
     uint16_t next_id;
-};
+} Block;
 
 typedef struct FuncDef {
     Linkage linkage;
@@ -187,6 +186,64 @@ typedef struct FuncDef {
     uint16_t blk_id;
     uint16_t next_id;
 } FuncDef;
+
+/* asm: AsmInstr.t and AsmInstr.u.mreg.mreg are platform-specific enum */
+
+typedef struct AsmInstr {
+    enum { SZ_NONE, SZ_B, SZ_H, SZ_W, SZ_L, SZ_S, SZ_D };
+    enum {
+        AP_NONE,
+        AP_I64, AP_F32, AP_F64, AP_SYM, AP_MREG,
+        /* these are removed in reg alloc */
+        AP_VREG,
+        AP_STK_ARG, /* stack-passed params on current frame */
+        AP_PREV_STK_ARG, /* stack-passed params on caller's frame */
+        AP_ALLOC /* static stack allocation; also used as reg save area */
+    };
+
+    uint8_t t;
+    uint8_t size; /* SZ_xxx, except SZ_BUF */
+    uint8_t arg_t[2]; /* AP_xxx */
+    union {
+        int64_t i64;
+        float f32;
+        double f64;
+        struct {
+            /* when is_got=1, offset is ignored. with ident=xs:
+               is_got=1 => xs@GOTPCREL(%rip)
+                    `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs.
+               is_got=0, offset=12 => xs+12(%rip)
+                    `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
+                    `movq xs+12(%rip), %rax` retrieves data at xs+12. */
+            Ident ident;
+            int32_t is_got:1;
+            int32_t offset:31;
+        } sym;
+        struct MReg {
+            /* when is_deref=0, offset is ignored. with mreg=%rdi:
+               is_deref=0 => %rdi
+               is_deref=1 => (%rdi)
+               is_deref=1, offset=12 => 12(%rdi) */
+            uint8_t size; /* SZ_xxx, except SZ_BUF */
+            uint8_t mreg;
+            int32_t is_deref:1;
+            int32_t offset:31;
+        } mreg;
+        uint32_t vreg;
+        int offset; /* byte offset */
+    } arg[2];
+} AsmInstr;
+
+typedef struct AsmFunc {
+    AsmInstr instr[1024]; /* 24KB; ends with .t == 0 (A_UNKNOWN) */
+    struct {
+        Ident ident;
+        uint32_t offset; /* index into instr, inclusive */
+    } label[128]; /* 1KB; ends with empty ident */
+    uint32_t stk_arg_sz;
+    uint32_t alloc_sz;
+    uint8_t has_dyn_alloc;
+} AsmFunc;
 
 /* ir.c */
 Ident Ident_from_str(const char *);
@@ -230,3 +287,8 @@ void fail(const char *, ...);
 
 /* dephi.c */
 void dephi(FuncDef *);
+
+/* isel.c */
+void dump_x64(AsmFunc *);
+AsmFunc *isel_simple_x64(FuncDef *); /* returns borrowed memory */
+AsmFunc *isel_x64(FuncDef *); /* returns borrowed memory */

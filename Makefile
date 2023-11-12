@@ -2,7 +2,9 @@
 .SUFFIXES:
 .SUFFIXES: .c .o
 
-OBJ = main.o ir.o parse.o util.o dephi.o
+COMMON_OBJ = main.o ir.o parse.o util.o dephi.o
+X64_OBJ = isel.o
+OBJ = $(COMMON_OBJ) $(X64_OBJ)
 
 SRCALL = $(OBJ:.o=.c)
 
@@ -15,6 +17,7 @@ wqbe: $(OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ): all.h instr.inc
+$(X64_OBJ): x64.h x64.inc
 
 clean:
 	rm -f *.o wqbe
