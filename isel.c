@@ -137,9 +137,9 @@ static void dump_mreg(uint8_t mreg, uint8_t size) {
 static void dump_arg(AsmInstr ai, int i) {
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
-    case AP_I64: printf("%lld", ai.arg[i].i64); return;
-    case AP_F32: printf("%f", ai.arg[i].f32); return;
-    case AP_F64: printf("%lf", ai.arg[i].f64); return;
+    case AP_I64: printf("$%lld", ai.arg[i].i64); return;
+    case AP_F32: printf("$%f", ai.arg[i].f32); return;
+    case AP_F64: printf("$%lf", ai.arg[i].f64); return;
     case AP_SYM:
         printf("%s", Ident_to_str(ai.arg[i].sym.ident));
         if (ai.arg[i].sym.is_got)
@@ -165,11 +165,14 @@ static void dump_arg(AsmInstr ai, int i) {
 
 void dump_x64(AsmFunc *f) {
     uint32_t i, lb = 0;
+    const char *s;
     AsmInstr ai;
+
     for (i = 0; f->instr[i].t; ++i) {
         while (f->label[lb].offset == i &&
                !Ident_eq(f->label[lb].ident, empty_ident)) {
-            printf("%s:\n", Ident_to_str(f->label[lb].ident));
+            s = Ident_to_str(f->label[lb].ident);
+            printf("%s%s:\n", s[0] == '@' ? "." : "", s+1);
             lb++;
         }
         ai = f->instr[i];
@@ -215,6 +218,14 @@ static struct {
 #define EMIT1(op,sz,r0) _EMIT1(op,sz,r0)
 #define EMIT2(op,sz,r0,r1) _EMIT2(op,sz,r0,r1)
 
+#define EMIT0(op,sz)                                        \
+    do {                                                    \
+        asm_func.instr[ctx.instr_cnt].t = A_##op;           \
+        asm_func.instr[ctx.instr_cnt].size = X64_SZ_##sz;   \
+        ctx.instr_cnt++;                                    \
+        assert(ctx.instr_cnt < countof(asm_func.instr));    \
+    } while (0)
+
 #define _EMIT1(op,sz,t0,r0)                                 \
     do {                                                    \
         asm_func.instr[ctx.instr_cnt].t = A_##op;           \
@@ -251,6 +262,94 @@ static void emit_label(Ident ident) {
     asm_func.label[ctx.label_cnt].offset = ctx.instr_cnt;
     ctx.label_cnt++;
     assert(ctx.label_cnt < countof(asm_func.label));
+}
+
+typedef struct ClassifyResult {
+    enum {
+        P_NO_CLASS, /* ignored for passing */
+        P_MEMORY,
+        P_SSE,
+        P_INTEGER
+    };
+    uint8_t fst; /* first eight bytes */
+    uint8_t snd; /* second */
+} ClassifyResult;
+
+static int classify_visit(uint32_t, Type, ClassifyResult *);
+
+static int classify_visit_struct(uint32_t offset, ArrType *sb,
+                                 ClassifyResult *r) {
+    int i;
+    uint32_t j, align;
+    for (i = 0; sb[i].t.t != TP_UNKNOWN; ++i) {
+        align = 1u << Type_log_align(sb[i].t);
+        if (i != 0)
+            offset = (offset + align - 1) & ~(align - 1);
+        for (j = 0; j < sb[i].count; ++j)
+            if (!classify_visit(offset, sb[i].t, r))
+                return 0;
+    }
+    return 1;
+}
+
+static int classify_visit(uint32_t offset, Type t, ClassifyResult *r) {
+    uint32_t align;
+    uint32_t size;
+    uint8_t *p;
+    AgType *ag;
+    int i;
+
+    align = 1u << Type_log_align(t);
+    size = Type_size(t);
+    if (offset & (align - 1)) {
+        r->fst = P_MEMORY;
+        return 0; /* early exit */
+    }
+    p = offset < 8 ? &r->fst : &r->snd;
+
+    switch (t.t) {
+    case TP_W: case TP_L:
+    case TP_B: case TP_H:
+    case TP_SB: case TP_UB: case TP_SH: case TP_UH:
+        *p = P_INTEGER;
+        return 1;
+    case TP_S: case TP_D:
+        if (*p == P_NO_CLASS)
+            *p = P_SSE;
+        return 1;
+    case TP_AG:
+        break;
+    default:
+        fail("unrecognized TYPE");
+        return 0; /* unreachable */
+    }
+
+    ag = AgType_get(t);
+    if (ag->is_opaque) {
+        /* ABI doc doesn't mention this,
+           but I guess opaque should be treated as char array */
+        *p = P_INTEGER;
+        if (offset < 8 && size >= 8)
+            r->snd = P_INTEGER;
+        return 1;
+    } else if (ag->is_union) {
+        for (i = 0; ag->u.ub[i]; ++i)
+            if (!classify_visit_struct(offset, ag->u.ub[i], r))
+                return 0;
+        return 1;
+    } else {
+        return classify_visit_struct(offset, ag->u.sb, r);
+    }
+}
+
+static ClassifyResult classify(Type t) {
+    ClassifyResult r = {0};
+    if (Type_size(t) > 16) {
+        r.fst = P_MEMORY;
+        return r;
+    }
+    classify_visit(0, t, &r);
+    return r;
 }
 
 static void emit_prologue(void) {

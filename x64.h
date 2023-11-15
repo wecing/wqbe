@@ -5,9 +5,9 @@
  *     1. if size > 16 bytes, MEMORY for the whole type;
  *        (or if contains unaligned fields -- unlikely in practice)
  *     2. for each eightbyte:
- *            (impossible?) if the whole eightbyte is padding: ignore
- *            if all non-padding fields are float/double: SSE
- *            otherwise: INTEGER
+ *        - (impossible?) if the whole eightbyte is padding: ignore
+ *        - if all non-padding fields are float/double: SSE
+ *        - otherwise: INTEGER
  *
  * parameter passing:
  *     MEMORY: use stack
@@ -18,6 +18,20 @@
  *     MEMORY: hidden arg in %rdi; %rax returns initial %rdi
  *     SSE: next available %xmm0, %xmm1
  *     INTEGER: next available %rax, %rdx
+ *
+ *
+ * alignment requirements:
+ *     - An array uses the same alignment as its elements, except that a local
+ *       or global array variable of length at least 16 bytes or a C99
+ *       variable-length array variable always has alignment of at least 16
+ *       bytes.
+ *     - The end of the input argument area shall be aligned on a 16 byte
+ *       boundary. In other words, the stack needs to be 16 byte aligned
+ *       immediately before the call instruction is executed.
+ *
+ * varargs-/stdargs- specific:
+ *     %al is used as hidden argument to specify the number of vector registers
+ *     used (%xmm0-%xmm7).
  */
 
 enum {
