@@ -252,8 +252,8 @@ int Ident_eq(Ident, Ident);
 int Type_is_subty(Type);
 int Type_is_extty(Type);
 int Type_is_abity(Type);
-uint8_t Type_log_align(Type); /* TODO: use platform-specific impls */
-uint32_t Type_size(Type); /* TODO: use platform-specific impls */
+uint8_t Type_log_align(Type);
+uint32_t Type_size(Type);
 Type AgType_lookup_or_fail(Ident);
 Type AgType_lookup_or_alloc(Ident);
 AgType *AgType_get(Type);

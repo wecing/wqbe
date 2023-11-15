@@ -148,7 +148,7 @@ uint8_t Type_log_align(Type t) {
 uint32_t Type_size(Type t) {
     AgType *ag;
     int i, j;
-    uint32_t s_sz;
+    uint32_t s_sz, align;
     uint32_t r = 0;
     switch (t.t) {
     case TP_B: case TP_SB: case TP_UB: return 1;
@@ -156,22 +156,27 @@ uint32_t Type_size(Type t) {
     case TP_W: case TP_S: return 4;
     case TP_L: case TP_D: return 8;
     case TP_AG:
-        /* TODO: do not assume type is packed */
         ag = &ag_type_pool[t.ag_id];
         if (ag->size != 0) {
             return ag->size;
-        }
-        if (ag->is_union) {
+        } else if (ag->is_union) {
             for (i = 0; ag->u.ub[i] != 0; ++i) {
                 s_sz = 0;
                 for (j = 0; ag->u.ub[i][j].t.t != TP_UNKNOWN; ++j) {
+                    align = 1u << Type_log_align(ag->u.ub[i][j].t);
+                    if (j != 0)
+                        s_sz = (s_sz + align - 1) & ~(align - 1);
                     s_sz += Type_size(ag->u.ub[i][j].t) * ag->u.ub[i][j].count;
                 }
                 r = r > s_sz ? r : s_sz;
             }
             return r;
         }
+
         for (i = 0; ag->u.sb[i].t.t != TP_UNKNOWN; ++i) {
+            align = 1u << Type_log_align(ag->u.sb[i].t);
+            if (i != 0)
+                r = (r + align - 1) & ~(align - 1);
             r += Type_size(ag->u.sb[i].t) * ag->u.sb[i].count;
         }
         return r;
