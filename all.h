@@ -291,4 +291,4 @@ void dephi(FuncDef *);
 /* isel.c */
 void dump_x64(AsmFunc *);
 AsmFunc *isel_simple_x64(FuncDef *); /* returns borrowed memory */
-AsmFunc *isel_x64(FuncDef *); /* returns borrowed memory */
+/* TODO: a non-trivial isel */

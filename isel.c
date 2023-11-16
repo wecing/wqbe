@@ -197,6 +197,7 @@ static struct {
     FuncDef fd;
     uint32_t instr_cnt; /* AsmFunc.instr */
     uint32_t label_cnt; /* AsmFunc.label */
+    int ret_ptr_alloc_offset;
 } ctx;
 
 #define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz, r, 0, 0)
@@ -213,6 +214,9 @@ static struct {
 #define R11 MREG(R_R11,Q)
 
 #define I64(v) AP_I64, .i64=(v)
+#define ALLOC(n) AP_ALLOC, .offset=(n)
+#define MREG_OFF(r,sz,off) AP_MREG, .mreg=mreg(X64_SZ_##sz, (r), 1, (off))
+#define PREV_STK_ARG(off) MREG_OFF(R_RBP, Q, 16+(off))
 
 /* each rN will be expanded to two args */
 #define EMIT1(op,sz,r0) _EMIT1(op,sz,r0)
@@ -280,14 +284,17 @@ static int classify_visit(uint32_t, Type, ClassifyResult *);
 static int classify_visit_struct(uint32_t offset, ArrType *sb,
                                  ClassifyResult *r) {
     int i;
-    uint32_t j, align;
+    uint32_t j, align, size;
     for (i = 0; sb[i].t.t != TP_UNKNOWN; ++i) {
         align = 1u << Type_log_align(sb[i].t);
+        size = Type_size(sb[i].t);
         if (i != 0)
             offset = (offset + align - 1) & ~(align - 1);
-        for (j = 0; j < sb[i].count; ++j)
+        for (j = 0; j < sb[i].count; ++j) {
             if (!classify_visit(offset, sb[i].t, r))
                 return 0;
+            offset += size;
+        }
     }
     return 1;
 }
@@ -353,12 +360,120 @@ static ClassifyResult classify(Type t) {
 }
 
 static void emit_prologue(void) {
+    static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
+    static uint8_t sse_regs[] = {
+        R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7};
+    uint8_t used_int_regs = 0, used_sse_regs = 0;
+    uint8_t ir_cnt, sr_cnt, use_stack;
+    uint8_t reg;
+    int i, j;
+    uint32_t prev_stk_arg_size = 0;
+    uint32_t copied_sz, tp_sz;
+    ClassifyResult cr;
+
     emit_label(ctx.fd.ident);
     EMIT1(PUSH, Q, RBP);
     EMIT2(MOV, Q, RSP, RBP);
     EMIT2(SUB, Q, I64(0), RSP); /* size to be updated later */
 
-    // TODO: finish emit_prologue
+    if (ctx.fd.ret_t.t != TP_NONE) {
+        cr = classify(ctx.fd.ret_t);
+        if (cr.fst == P_MEMORY) {
+            EMIT2(MOV, Q, RDI, ALLOC(asm_func.alloc_sz));
+            ctx.ret_ptr_alloc_offset = asm_func.alloc_sz;
+            used_int_regs++;
+            asm_func.alloc_sz += 8;
+        }
+    }
+
+    for (i = 0; ctx.fd.params[i].t.t != TP_UNKNOWN; ++i) {
+        check(!(i == 0 && ctx.fd.params[i].t.t == TP_NONE),
+              "env params not supported"); /* TODO: support env */
+        use_stack = (used_int_regs == countof(int_regs) &&
+                     used_sse_regs == countof(sse_regs));
+        if (!use_stack) {
+            cr = classify(ctx.fd.params[i].t);
+            ir_cnt = sr_cnt = 0;
+            use_stack = cr.fst == P_MEMORY;
+            if (!use_stack) {
+                if (cr.fst == P_INTEGER) ir_cnt++;
+                else if (cr.fst == P_SSE) sr_cnt++;
+                if (cr.snd == P_INTEGER) ir_cnt++;
+                else if (cr.snd == P_SSE) sr_cnt++;
+                use_stack =
+                    used_int_regs + ir_cnt > countof(int_regs) ||
+                    used_sse_regs + sr_cnt > countof(sse_regs);
+            }
+        }
+
+        if (!use_stack) {
+            /* use regs */
+            /* TODO: record params[i] => ALLOC(alloc_sz)
+             * printf(">>> %s: %s => ALLOC(%u)\n",
+             *       Ident_to_str(ctx.fd.ident),
+             *       Ident_to_str(ctx.fd.params[i].ident),
+             *       asm_func.alloc_sz); */
+            for (j = 0; j < 2; ++j) {
+                /* RAX: placeholder */
+                if (((uint8_t *) &cr)[j] == P_INTEGER) {
+                    reg = int_regs[used_int_regs++];
+                    EMIT2(MOV, Q, RAX, ALLOC(asm_func.alloc_sz));
+                } else if (((uint8_t *) &cr)[j] == P_SSE) {
+                    reg = sse_regs[used_sse_regs++];
+                    EMIT2(MOVS, D, RAX, ALLOC(asm_func.alloc_sz));
+                } else continue;
+                asm_func.alloc_sz += 8;
+                /* fix placeholder RAX */
+                asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.mreg = reg;
+                asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.size =
+                    asm_func.instr[ctx.instr_cnt - 1].size;
+            }
+        } else {
+            /* use stack */
+            /* TODO: record params[i] => ALLOC(alloc_sz)
+             * printf(">>> %s: %s => PREV_STK_ARG(%u) => ALLOC(%u)\n",
+             *       Ident_to_str(ctx.fd.ident),
+             *       Ident_to_str(ctx.fd.params[i].ident),
+             *       prev_stk_arg_size, asm_func.alloc_sz); */
+            if (ctx.fd.params[i].t.t == TP_AG) {
+                /* aggregate: IR values are actually addresses */
+                EMIT2(LEA, Q,
+                      ALLOC(asm_func.alloc_sz + 8),
+                      ALLOC(asm_func.alloc_sz));
+                asm_func.alloc_sz += 8;
+            }
+            /* copy to current frame */
+            copied_sz = 0;
+            tp_sz = Type_size(ctx.fd.params[i].t);
+            while (tp_sz - copied_sz >= 8) {
+                EMIT2(MOV, Q,
+                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
+                      ALLOC(asm_func.alloc_sz + copied_sz));
+                copied_sz += 8;
+            }
+            while (tp_sz - copied_sz >= 4) {
+                EMIT2(MOV, L,
+                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
+                      ALLOC(asm_func.alloc_sz + copied_sz));
+                copied_sz += 4;
+            }
+            while (tp_sz - copied_sz >= 2) {
+                EMIT2(MOV, W,
+                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
+                      ALLOC(asm_func.alloc_sz + copied_sz));
+                copied_sz += 2;
+            }
+            while (tp_sz - copied_sz >= 1) {
+                EMIT2(MOV, B,
+                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
+                      ALLOC(asm_func.alloc_sz + copied_sz));
+                copied_sz += 1;
+            }
+
+            prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
+            asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
+        }
+    }
 }
 
 AsmFunc *isel_simple_x64(FuncDef *fd) {
@@ -368,18 +483,6 @@ AsmFunc *isel_simple_x64(FuncDef *fd) {
 
     emit_prologue();
     /* TODO: isel_simple_x64 */
-
-    asm_func.instr[ctx.instr_cnt].t = A_UNKNOWN;
-    asm_func.label[ctx.label_cnt].ident = empty_ident;
-    return &asm_func;
-}
-
-AsmFunc *isel_x64(FuncDef *fd) {
-    memset(&asm_func, 0, sizeof(asm_func));
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.fd = *fd;
-
-    /* TODO: isel_x64 */
 
     asm_func.instr[ctx.instr_cnt].t = A_UNKNOWN;
     asm_func.label[ctx.label_cnt].ident = empty_ident;
