@@ -58,7 +58,8 @@ enum {
     R_XMM4,
     R_XMM5,
     R_XMM6,
-    R_XMM7
+    R_XMM7,
+    R_END /* does not exist in x64 */
 };
 
 enum AsmInstrType {

@@ -198,7 +198,31 @@ static struct {
     uint32_t instr_cnt; /* AsmFunc.instr */
     uint32_t label_cnt; /* AsmFunc.label */
     int ret_ptr_alloc_offset;
+
+    struct {
+        Ident ident;
+        uint32_t offset; /* byte offset for AP_ALLOC */
+    } tmp[1024]; /* 8KB */
+    uint32_t tmp_cnt;
 } ctx;
+
+static void record_tmp(Ident ident, uint32_t offset) {
+    assert(ctx.tmp_cnt < countof(ctx.tmp));
+    ctx.tmp[ctx.tmp_cnt].ident = ident;
+    ctx.tmp[ctx.tmp_cnt].offset = offset;
+    ctx.tmp_cnt++;
+}
+
+static uint32_t find_or_alloc_tmp(Ident ident) {
+    uint32_t i, offset;
+    for (i = 0; i < ctx.tmp_cnt; ++i)
+        if (Ident_eq(ident, ctx.tmp[i].ident))
+            return ctx.tmp[i].offset;
+    offset = asm_func.alloc_sz;
+    asm_func.alloc_sz += 8;
+    record_tmp(ident, offset);
+    return offset;
+}
 
 #define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz, r, 0, 0)
 #define RAX MREG(R_RAX,Q)
@@ -212,11 +236,14 @@ static struct {
 #define R9  MREG(R_R9 ,Q)
 #define R10 MREG(R_R10,Q)
 #define R11 MREG(R_R11,Q)
+#define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
 #define ALLOC(n) AP_ALLOC, .offset=(n)
-#define MREG_OFF(r,sz,off) AP_MREG, .mreg=mreg(X64_SZ_##sz, (r), 1, (off))
-#define PREV_STK_ARG(off) MREG_OFF(R_RBP, Q, 16+(off))
+#define SYM_GOT(id) AP_SYM, .sym=msym(id,1,0)
+#define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
+#define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q, (r), 1, (off))
+#define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
 
 /* each rN will be expanded to two args */
 #define EMIT1(op,sz,r0) _EMIT1(op,sz,r0)
@@ -251,6 +278,16 @@ static struct {
         ctx.instr_cnt++;                                    \
         assert(ctx.instr_cnt < countof(asm_func.instr));    \
     } while (0)
+
+#define LAST_INSTR (asm_func.instr[ctx.instr_cnt - 1])
+
+static struct MSym msym(Ident ident, int is_got, int offset) {
+    struct MSym r;
+    r.ident = ident;
+    r.is_got = is_got;
+    r.offset = offset;
+    return r;
+}
 
 static struct MReg mreg(int size, int mreg, int is_deref, int offset) {
     struct MReg r;
@@ -408,33 +445,23 @@ static void emit_prologue(void) {
 
         if (!use_stack) {
             /* use regs */
-            /* TODO: record params[i] => ALLOC(alloc_sz)
-             * printf(">>> %s: %s => ALLOC(%u)\n",
-             *       Ident_to_str(ctx.fd.ident),
-             *       Ident_to_str(ctx.fd.params[i].ident),
-             *       asm_func.alloc_sz); */
+            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
             for (j = 0; j < 2; ++j) {
-                /* RAX: placeholder */
                 if (((uint8_t *) &cr)[j] == P_INTEGER) {
                     reg = int_regs[used_int_regs++];
-                    EMIT2(MOV, Q, RAX, ALLOC(asm_func.alloc_sz));
+                    EMIT2(MOV, Q, FAKE, ALLOC(asm_func.alloc_sz));
                 } else if (((uint8_t *) &cr)[j] == P_SSE) {
                     reg = sse_regs[used_sse_regs++];
-                    EMIT2(MOVS, D, RAX, ALLOC(asm_func.alloc_sz));
+                    EMIT2(MOVS, D, FAKE, ALLOC(asm_func.alloc_sz));
                 } else continue;
                 asm_func.alloc_sz += 8;
-                /* fix placeholder RAX */
                 asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.mreg = reg;
                 asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.size =
                     asm_func.instr[ctx.instr_cnt - 1].size;
             }
         } else {
             /* use stack */
-            /* TODO: record params[i] => ALLOC(alloc_sz)
-             * printf(">>> %s: %s => PREV_STK_ARG(%u) => ALLOC(%u)\n",
-             *       Ident_to_str(ctx.fd.ident),
-             *       Ident_to_str(ctx.fd.params[i].ident),
-             *       prev_stk_arg_size, asm_func.alloc_sz); */
+            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
             if (ctx.fd.params[i].t.t == TP_AG) {
                 /* aggregate: IR values are actually addresses */
                 EMIT2(LEA, Q,
@@ -476,13 +503,262 @@ static void emit_prologue(void) {
     }
 }
 
+typedef struct VisitValueResult {
+    uint8_t t; /* AP_xxx */
+    AsmInstrArg a;
+} VisitValueResult;
+
+/* avail_mreg is not guaranteed to be used */
+static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
+    VisitValueResult r = {0};
+    switch (v.t) {
+    case V_CI:
+        r.t = AP_I64;
+        r.a.i64 = v.u.u64;
+        return r;
+    case V_CS:
+        r.t = AP_F32;
+        r.a.f32 = v.u.s;
+        return r;
+    case V_CD:
+        r.t = AP_F64;
+        r.a.f64 = v.u.d;
+        return r;
+    case V_CSYM:
+    case V_CTHS:
+        EMIT2(LEA, Q, SYM_OFF(v.u.global_ident, 0), FAKE);
+        asm_func.instr[ctx.instr_cnt - 1].arg[1].mreg.mreg = avail_mreg;
+        /* now the symbol address is at %avail_mreg. */
+        r.t = AP_MREG;
+        r.a.mreg = mreg(X64_SZ_Q, avail_mreg, 0, 0);
+        return r;
+    case V_TMP:
+        /* allow visiting usage before def */
+        r.t = AP_ALLOC;
+        r.a.offset = find_or_alloc_tmp(v.u.tmp_ident);
+        return r;
+    default: break;
+    }
+    fail("unrecognized VALUE type");
+    return r; /* unreachable */
+}
+
+static void isel_copy(Instr instr) {
+    uint32_t tp_sz, copied_sz;
+    VisitValueResult vvr;
+
+    vvr = visit_value(instr.u.args[0], R_R10);
+    if (instr.ret_t.t == TP_AG) {
+        /* output of copy op */
+        EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz),
+              ALLOC(find_or_alloc_tmp(instr.ident)));
+        /* actual coping */
+        EMIT2(MOV, Q, FAKE, R10);
+        LAST_INSTR.arg_t[0] = vvr.t;
+        LAST_INSTR.arg[0] = vvr.a;
+        tp_sz = Type_size(instr.ret_t);
+        copied_sz = 0;
+        while (tp_sz - copied_sz >= 8) {
+            EMIT2(MOV, Q, MREG_OFF(R_R10, copied_sz),
+                  ALLOC(asm_func.alloc_sz + copied_sz));
+            copied_sz += 8;
+        }
+        while (tp_sz - copied_sz >= 4) {
+            EMIT2(MOV, L, MREG_OFF(R_R10, copied_sz),
+                  ALLOC(asm_func.alloc_sz + copied_sz));
+            copied_sz += 4;
+        }
+        while (tp_sz - copied_sz >= 2) {
+            EMIT2(MOV, W, MREG_OFF(R_R10, copied_sz),
+                  ALLOC(asm_func.alloc_sz + copied_sz));
+            copied_sz += 2;
+        }
+        while (tp_sz - copied_sz >= 1) {
+            EMIT2(MOV, B, MREG_OFF(R_R10, copied_sz),
+                  ALLOC(asm_func.alloc_sz + copied_sz));
+            copied_sz += 1;
+        }
+        asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
+    } else {
+        switch (instr.ret_t.t) {
+#define DST ALLOC(find_or_alloc_tmp(instr.ident))
+        case TP_W: EMIT2(MOV, L, FAKE, DST); break;
+        case TP_L: EMIT2(MOV, Q, FAKE, DST); break;
+        case TP_S: EMIT2(MOVS, S, FAKE, DST); break;
+        case TP_D: EMIT2(MOVS, D, FAKE, DST); break;
+#undef DST
+        default:
+            fail("unexpected copy type");
+        }
+        LAST_INSTR.arg_t[0] = vvr.t;
+        LAST_INSTR.arg[0] = vvr.a;
+    }
+}
+
+static void isel(Instr instr) {
+    static const char *op_name[] = {
+        0,
+#define I(up,low) #low,
+#include "instr.inc"
+#undef I
+        0
+    };
+
+    switch (instr.t) {
+    case I_ADD:
+    case I_AND:
+    case I_DIV:
+    case I_MUL:
+    case I_NEG:
+    case I_OR:
+    case I_REM:
+    case I_SAR:
+    case I_SHL:
+    case I_SHR:
+    case I_SUB:
+    case I_UDIV:
+    case I_UREM:
+    case I_XOR:
+        /* TODO: implement isel: arith and bits */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_ALLOC16:
+    case I_ALLOC4:
+    case I_ALLOC8:
+    case I_BLIT:
+    case I_LOADD:
+    case I_LOADL:
+    case I_LOADS:
+    case I_LOADSB:
+    case I_LOADSH:
+    case I_LOADSW:
+    case I_LOADUB:
+    case I_LOADUH:
+    case I_LOADUW:
+    case I_LOADW:
+    case I_STOREB:
+    case I_STORED:
+    case I_STOREH:
+    case I_STOREL:
+    case I_STORES:
+    case I_STOREW:
+        /* TODO: implement isel: memory */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_CEQD:
+    case I_CEQL:
+    case I_CEQS:
+    case I_CEQW:
+    case I_CGED:
+    case I_CGES:
+    case I_CGTD:
+    case I_CGTS:
+    case I_CLED:
+    case I_CLES:
+    case I_CLTD:
+    case I_CLTS:
+    case I_CNED:
+    case I_CNEL:
+    case I_CNES:
+    case I_CNEW:
+    case I_COD:
+    case I_COS:
+    case I_CSGEL:
+    case I_CSGEW:
+    case I_CSGTL:
+    case I_CSGTW:
+    case I_CSLEL:
+    case I_CSLEW:
+    case I_CSLTL:
+    case I_CSLTW:
+    case I_CUGEL:
+    case I_CUGEW:
+    case I_CUGTL:
+    case I_CUGTW:
+    case I_CULEL:
+    case I_CULEW:
+    case I_CULTL:
+    case I_CULTW:
+    case I_CUOD:
+    case I_CUOS:
+        /* TODO: implement isel: cmp */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_DTOSI:
+    case I_DTOUI:
+    case I_EXTS:
+    case I_EXTSB:
+    case I_EXTSH:
+    case I_EXTSW:
+    case I_EXTUB:
+    case I_EXTUH:
+    case I_EXTUW:
+    case I_SLTOF:
+    case I_ULTOF:
+    case I_STOSI:
+    case I_STOUI:
+    case I_SWTOF:
+    case I_UWTOF:
+    case I_TRUNCD:
+        /* TODO: implement isel: conv */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_CAST:
+        /* TODO: implement isel: cast & copy */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_COPY:
+        isel_copy(instr);
+        return;
+    case I_CALL:
+        /* TODO: implement isel: call */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_VASTART:
+    case I_VAARG:
+        /* TODO: implement isel: vastart & vaarg */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_PHI:
+        fail("unexpected phi op");
+    case I_HLT:
+    case I_JMP:
+    case I_JNZ:
+    case I_RET:
+        /* TODO: implement isel: jumps */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    }
+    fail("unrecognized instr type %d", instr.t);
+}
+
 AsmFunc *isel_simple_x64(FuncDef *fd) {
+    uint16_t blk_id;
+    uint32_t instr_id;
+    Block blk;
+    Instr instr;
+
     memset(&asm_func, 0, sizeof(asm_func));
     memset(&ctx, 0, sizeof(ctx));
     ctx.fd = *fd;
 
     emit_prologue();
-    /* TODO: isel_simple_x64 */
+
+    blk_id = ctx.fd.blk_id;
+    while (blk_id) {
+        blk = *Block_get(blk_id);
+        blk_id = blk.next_id;
+
+        emit_label(blk.ident);
+
+        instr_id = blk.instr_id;
+        while (instr_id) {
+            instr = *Instr_get(instr_id);
+            instr_id = instr.next_id;
+            isel(instr);
+        }
+        isel(*Instr_get(blk.jump_id));
+    }
 
     asm_func.instr[ctx.instr_cnt].t = A_UNKNOWN;
     asm_func.label[ctx.label_cnt].ident = empty_ident;

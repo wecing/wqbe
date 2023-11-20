@@ -189,6 +189,8 @@ typedef struct FuncDef {
 
 /* asm: AsmInstr.t and AsmInstr.u.mreg.mreg are platform-specific enum */
 
+typedef union AsmInstrArg AsmInstrArg;
+
 typedef struct AsmInstr {
     enum { SZ_NONE, SZ_B, SZ_H, SZ_W, SZ_L, SZ_S, SZ_D };
     enum {
@@ -204,11 +206,11 @@ typedef struct AsmInstr {
     uint8_t t;
     uint8_t size; /* SZ_xxx, except SZ_BUF */
     uint8_t arg_t[2]; /* AP_xxx */
-    union {
+    union AsmInstrArg {
         int64_t i64;
         float f32;
         double f64;
-        struct {
+        struct MSym {
             /* when is_got=1, offset is ignored. with ident=xs:
                is_got=1 => xs@GOTPCREL(%rip)
                     `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs.
@@ -291,4 +293,3 @@ void dephi(FuncDef *);
 /* isel.c */
 void dump_x64(AsmFunc *);
 AsmFunc *isel_simple_x64(FuncDef *); /* returns borrowed memory */
-/* TODO: a non-trivial isel */
