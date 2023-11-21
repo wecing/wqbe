@@ -244,6 +244,7 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
 #define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
 #define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
+#define ARG(t,a) (t), =(a)
 
 /* each rN will be expanded to two args */
 #define EMIT1(op,sz,r0) _EMIT1(op,sz,r0)
@@ -455,9 +456,8 @@ static void emit_prologue(void) {
                     EMIT2(MOVS, D, FAKE, ALLOC(asm_func.alloc_sz));
                 } else continue;
                 asm_func.alloc_sz += 8;
-                asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.mreg = reg;
-                asm_func.instr[ctx.instr_cnt - 1].arg[0].mreg.size =
-                    asm_func.instr[ctx.instr_cnt - 1].size;
+                LAST_INSTR.arg[0].mreg.mreg = reg;
+                LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
             }
         } else {
             /* use stack */
@@ -527,7 +527,7 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
     case V_CSYM:
     case V_CTHS:
         EMIT2(LEA, Q, SYM_OFF(v.u.global_ident, 0), FAKE);
-        asm_func.instr[ctx.instr_cnt - 1].arg[1].mreg.mreg = avail_mreg;
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
         /* now the symbol address is at %avail_mreg. */
         r.t = AP_MREG;
         r.a.mreg = mreg(X64_SZ_Q, avail_mreg, 0, 0);
@@ -544,7 +544,7 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
 }
 
 static void isel_copy(Instr instr) {
-    uint32_t tp_sz, copied_sz;
+    uint32_t tp_sz, copied_sz, d;
     VisitValueResult vvr;
 
     vvr = visit_value(instr.u.args[0], R_R10);
@@ -553,9 +553,7 @@ static void isel_copy(Instr instr) {
         EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz),
               ALLOC(find_or_alloc_tmp(instr.ident)));
         /* actual coping */
-        EMIT2(MOV, Q, FAKE, R10);
-        LAST_INSTR.arg_t[0] = vvr.t;
-        LAST_INSTR.arg[0] = vvr.a;
+        EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
         tp_sz = Type_size(instr.ret_t);
         copied_sz = 0;
         while (tp_sz - copied_sz >= 8) {
@@ -580,18 +578,15 @@ static void isel_copy(Instr instr) {
         }
         asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
     } else {
+        d = find_or_alloc_tmp(instr.ident);
         switch (instr.ret_t.t) {
-#define DST ALLOC(find_or_alloc_tmp(instr.ident))
-        case TP_W: EMIT2(MOV, L, FAKE, DST); break;
-        case TP_L: EMIT2(MOV, Q, FAKE, DST); break;
-        case TP_S: EMIT2(MOVS, S, FAKE, DST); break;
-        case TP_D: EMIT2(MOVS, D, FAKE, DST); break;
-#undef DST
+        case TP_W: EMIT2(MOV, L, ARG(vvr.t, vvr.a), ALLOC(d)); break;
+        case TP_L: EMIT2(MOV, Q, ARG(vvr.t, vvr.a), ALLOC(d)); break;
+        case TP_S: EMIT2(MOVS, S, ARG(vvr.t, vvr.a), ALLOC(d)); break;
+        case TP_D: EMIT2(MOVS, D, ARG(vvr.t, vvr.a), ALLOC(d)); break;
         default:
             fail("unexpected copy type");
         }
-        LAST_INSTR.arg_t[0] = vvr.t;
-        LAST_INSTR.arg[0] = vvr.a;
     }
 }
 
@@ -604,9 +599,7 @@ static void isel_jnz(Instr instr) {
        i64 is also allowed but higher 32 bits are discarded. */
     VisitValueResult vvr;
     vvr = visit_value(instr.u.jump.v, R_R10);
-    EMIT2(CMP, L, FAKE, I64(0));
-    LAST_INSTR.arg_t[0] = vvr.t;
-    LAST_INSTR.arg[0] = vvr.a;
+    EMIT2(CMP, L, ARG(vvr.t, vvr.a), I64(0));
     EMIT1(JNZ, NONE, SYM_OFF(instr.u.jump.dst, 0));
     EMIT1(JMP, NONE, SYM_OFF(instr.u.jump.dst_else, 0));
 }
