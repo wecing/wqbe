@@ -224,7 +224,7 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
     return offset;
 }
 
-#define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz, r, 0, 0)
+#define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz,r,0,0)
 #define RAX MREG(R_RAX,Q)
 #define RSP MREG(R_RSP,Q)
 #define RBP MREG(R_RBP,Q)
@@ -242,7 +242,7 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define ALLOC(n) AP_ALLOC, .offset=(n)
 #define SYM_GOT(id) AP_SYM, .sym=msym(id,1,0)
 #define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
-#define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q, (r), 1, (off))
+#define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
 #define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
 
 /* each rN will be expanded to two args */
@@ -595,6 +595,22 @@ static void isel_copy(Instr instr) {
     }
 }
 
+static void isel_jmp(Instr instr) {
+    EMIT1(JMP, NONE, SYM_OFF(instr.u.jump.dst, 0));
+}
+
+static void isel_jnz(Instr instr) {
+    /* QBE requires cond to be of i32 type;
+       i64 is also allowed but higher 32 bits are discarded. */
+    VisitValueResult vvr;
+    vvr = visit_value(instr.u.jump.v, R_R10);
+    EMIT2(CMP, L, FAKE, I64(0));
+    LAST_INSTR.arg_t[0] = vvr.t;
+    LAST_INSTR.arg[0] = vvr.a;
+    EMIT1(JNZ, NONE, SYM_OFF(instr.u.jump.dst, 0));
+    EMIT1(JMP, NONE, SYM_OFF(instr.u.jump.dst_else, 0));
+}
+
 static void isel(Instr instr) {
     static const char *op_name[] = {
         0,
@@ -707,9 +723,7 @@ static void isel(Instr instr) {
         /* TODO: implement isel: cast & copy */
         fail("not implemented: %s", op_name[instr.t]);
         return;
-    case I_COPY:
-        isel_copy(instr);
-        return;
+    case I_COPY: isel_copy(instr); return;
     case I_CALL:
         /* TODO: implement isel: call */
         fail("not implemented: %s", op_name[instr.t]);
@@ -722,10 +736,13 @@ static void isel(Instr instr) {
     case I_PHI:
         fail("unexpected phi op");
     case I_HLT:
-    case I_JMP:
-    case I_JNZ:
+        /* TODO: implement isel: halt */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_JMP: isel_jmp(instr); return;
+    case I_JNZ: isel_jnz(instr); return;
     case I_RET:
-        /* TODO: implement isel: jumps */
+        /* TODO: implement isel: ret */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     }

@@ -216,7 +216,8 @@ typedef struct AsmInstr {
                     `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs.
                is_got=0, offset=12 => xs+12(%rip)
                     `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
-                    `movq xs+12(%rip), %rax` retrieves data at xs+12. */
+                    `movq xs+12(%rip), %rax` retrieves data at xs+12.
+               when used in jump ops, only ident is used. (e.g. jmp .BB0) */
             Ident ident;
             int32_t is_got:1;
             int32_t offset:31;

@@ -1,3 +1,6 @@
+A(CMP,cmp)
+A(JMP,jmp)
+A(JNZ,jnz)
 A(LEA,lea)
 A(MOV,mov)
 A(MOVS,movs)
