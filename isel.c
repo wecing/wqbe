@@ -135,13 +135,17 @@ static void dump_mreg(uint8_t mreg, uint8_t size) {
 }
 
 static void dump_arg(AsmInstr ai, int i) {
+    const char *s;
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
     case AP_I64: printf("$%lld", ai.arg[i].i64); return;
     case AP_F32: printf("$%f", ai.arg[i].f32); return;
     case AP_F64: printf("$%lf", ai.arg[i].f64); return;
     case AP_SYM:
-        printf("%s", Ident_to_str(ai.arg[i].sym.ident));
+        s = Ident_to_str(ai.arg[i].sym.ident);
+        printf("%s%s", s[0] == '@' ? "." : "", s+1);
+        if (ai.t == A_JMP || ai.t == A_JNE)
+            return;
         if (ai.arg[i].sym.is_got)
             printf("@GOTPCREL");
         else if (ai.arg[i].sym.offset)
@@ -197,7 +201,7 @@ static struct {
     FuncDef fd;
     uint32_t instr_cnt; /* AsmFunc.instr */
     uint32_t label_cnt; /* AsmFunc.label */
-    int ret_ptr_alloc_offset;
+    int32_t ret_ptr_alloc_offset;
 
     struct {
         Ident ident;
@@ -236,10 +240,12 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define R9  MREG(R_R9 ,Q)
 #define R10 MREG(R_R10,Q)
 #define R11 MREG(R_R11,Q)
+#define XMM0 MREG(R_XMM0,D)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
 #define ALLOC(n) AP_ALLOC, .offset=(n)
+#define SYM(id) AP_SYM, .sym=msym(id,0,0)
 #define SYM_GOT(id) AP_SYM, .sym=msym(id,1,0)
 #define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
 #define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
@@ -526,7 +532,7 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
         return r;
     case V_CSYM:
     case V_CTHS:
-        EMIT2(LEA, Q, SYM_OFF(v.u.global_ident, 0), FAKE);
+        EMIT2(LEA, Q, SYM(v.u.global_ident), FAKE);
         LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
         /* now the symbol address is at %avail_mreg. */
         r.t = AP_MREG;
@@ -590,8 +596,19 @@ static void isel_copy(Instr instr) {
     }
 }
 
+static void isel_phi(Instr instr) {
+    (void)instr;
+    fail("unexpected phi op");
+}
+
+static void isel_hlt(Instr instr) {
+    (void)instr;
+    EMIT2(MOV, Q, I64(0), R10);
+    EMIT2(MOV, Q, I64(0), MREG_OFF(R_R10, 0)); /* segfault */
+}
+
 static void isel_jmp(Instr instr) {
-    EMIT1(JMP, NONE, SYM_OFF(instr.u.jump.dst, 0));
+    EMIT1(JMP, NONE, SYM(instr.u.jump.dst));
 }
 
 static void isel_jnz(Instr instr) {
@@ -600,8 +617,88 @@ static void isel_jnz(Instr instr) {
     VisitValueResult vvr;
     vvr = visit_value(instr.u.jump.v, R_R10);
     EMIT2(CMP, L, ARG(vvr.t, vvr.a), I64(0));
-    EMIT1(JNZ, NONE, SYM_OFF(instr.u.jump.dst, 0));
-    EMIT1(JMP, NONE, SYM_OFF(instr.u.jump.dst_else, 0));
+    EMIT1(JNE, NONE, SYM(instr.u.jump.dst));
+    EMIT1(JMP, NONE, SYM(instr.u.jump.dst_else));
+}
+
+static void isel_ret(Instr instr) {
+    if (instr.u.jump.v.t != V_UNKNOWN) {
+        VisitValueResult vvr = visit_value(instr.u.jump.v, R_R10);
+        if (ctx.fd.ret_t.t == TP_AG) {
+            ClassifyResult cr = classify(ctx.fd.ret_t);
+            if (cr.fst == P_MEMORY) {
+                uint32_t tp_sz = Type_size(ctx.fd.ret_t);
+                uint32_t copied_sz = 0;
+                /* RAX: required by ABI */
+                EMIT2(MOV, Q, ALLOC(ctx.ret_ptr_alloc_offset), RAX);
+                EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+                while (tp_sz - copied_sz >= 8) {
+                    EMIT2(MOV, Q,
+                          MREG_OFF(R_R10, copied_sz),
+                          MREG_OFF(R_RAX, copied_sz));
+                    copied_sz += 8;
+                }
+                while (tp_sz - copied_sz >= 4) {
+                    EMIT2(MOV, L,
+                          MREG_OFF(R_R10, copied_sz),
+                          MREG_OFF(R_RAX, copied_sz));
+                    copied_sz += 4;
+                }
+                while (tp_sz - copied_sz >= 2) {
+                    EMIT2(MOV, W,
+                          MREG_OFF(R_R10, copied_sz),
+                          MREG_OFF(R_RAX, copied_sz));
+                    copied_sz += 2;
+                }
+                while (tp_sz - copied_sz >= 1) {
+                    EMIT2(MOV, B,
+                          MREG_OFF(R_R10, copied_sz),
+                          MREG_OFF(R_RAX, copied_sz));
+                    copied_sz += 1;
+                }
+            } else {
+                int i;
+                int used_int_regs = 0, used_sse_regs = 0;
+                uint8_t *crp = (void*) &cr;
+                EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+                /* TODO: this is not always correct.
+                   e.g. the return type could be a struct {char[7]}, placed at
+                   0x7; movq from 0x7 is misaligned access. a better solution
+                   might be to copy the result into an on-stack well-aligned
+                   place, then move into %rax/%rdi/%xmm0/%xmm1. */
+                for (i = 0; i < 2; ++i) {
+                    if (crp[i] == P_SSE) {
+                        EMIT2(MOVS, D, MREG_OFF(R_R10, i * 8), FAKE);
+                        LAST_INSTR.arg[1].mreg.mreg =
+                            used_sse_regs == 0 ? R_XMM0 : R_XMM1;
+                        LAST_INSTR.arg[1].mreg.size = LAST_INSTR.size;
+                        used_sse_regs++;
+                    } else if (crp[i] == P_INTEGER) {
+                        EMIT2(MOV, Q, MREG_OFF(R_R10, i * 8), FAKE);
+                        LAST_INSTR.arg[1].mreg.mreg =
+                            used_int_regs == 0 ? R_RAX : R_RDX;
+                        used_int_regs++;
+                    }
+                }
+            }
+        } else {
+            switch (ctx.fd.ret_t.t) {
+#define SRC ARG(vvr.t, vvr.a)
+            case TP_W: EMIT2(MOV, L, SRC, MREG(R_RAX, L)); break;
+            case TP_L: EMIT2(MOV, Q, SRC, RAX); break;
+            case TP_S: EMIT2(MOVS, S, SRC, XMM0); break;
+            case TP_D: EMIT2(MOVS, D, SRC, XMM0); break;
+            case TP_SB: case TP_UB: EMIT2(MOV, B, SRC, MREG(R_RAX, B)); break;
+            case TP_SH: case TP_UH: EMIT2(MOV, W, SRC, MREG(R_RAX, W)); break;
+#undef SRC
+            default:
+                fail("FUNCDEF must return [ABITY]");
+            }
+        }
+    }
+    EMIT2(MOV, Q, RBP, RSP);
+    EMIT1(POP, Q, RBP);
+    EMIT0(RET, NONE);
 }
 
 static void isel(Instr instr) {
@@ -726,18 +823,11 @@ static void isel(Instr instr) {
         /* TODO: implement isel: vastart & vaarg */
         fail("not implemented: %s", op_name[instr.t]);
         return;
-    case I_PHI:
-        fail("unexpected phi op");
-    case I_HLT:
-        /* TODO: implement isel: halt */
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_PHI: isel_phi(instr); return;
+    case I_HLT: isel_hlt(instr); return;
     case I_JMP: isel_jmp(instr); return;
     case I_JNZ: isel_jnz(instr); return;
-    case I_RET:
-        /* TODO: implement isel: ret */
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_RET: isel_ret(instr); return;
     }
     fail("unrecognized instr type %d", instr.t);
 }
@@ -772,5 +862,6 @@ AsmFunc *isel_simple_x64(FuncDef *fd) {
 
     asm_func.instr[ctx.instr_cnt].t = A_UNKNOWN;
     asm_func.label[ctx.label_cnt].ident = empty_ident;
+    asm_func.instr[2].arg[0].i64 = asm_func.alloc_sz; /* fix sub $0, %rsp */
     return &asm_func;
 }
