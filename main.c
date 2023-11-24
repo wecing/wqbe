@@ -29,11 +29,11 @@ static void run_all_fd(uint16_t id, void (*f)(FuncDef *)) {
 
 static void x64(FuncDef *fd) {
     AsmFunc *af;
-    af = isel_simple_x64(fd);
+    af = isel_naive_x64(fd);
 
     if (dump_debug_info) {
         printf("\n####################\n");
-        printf("### %s after isel_simple_x64()\n", Ident_to_str(fd->ident));
+        printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
     }
     dump_x64(af);

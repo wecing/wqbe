@@ -832,7 +832,7 @@ static void isel(Instr instr) {
     fail("unrecognized instr type %d", instr.t);
 }
 
-AsmFunc *isel_simple_x64(FuncDef *fd) {
+AsmFunc *isel_naive_x64(FuncDef *fd) {
     uint16_t blk_id;
     uint32_t instr_id;
     Block blk;

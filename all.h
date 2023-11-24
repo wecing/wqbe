@@ -291,6 +291,6 @@ void fail(const char *, ...);
 /* dephi.c */
 void dephi(FuncDef *);
 
-/* isel.c */
+/* isel_naive.c */
 void dump_x64(AsmFunc *);
-AsmFunc *isel_simple_x64(FuncDef *); /* returns borrowed memory */
+AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
