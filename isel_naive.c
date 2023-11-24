@@ -4,6 +4,9 @@
 #include "all.h"
 #include "x64.h"
 
+/* TODO: struct copying codegen assumes 8-bit alignment.
+   also, there should be a helper method for it. */
+
 static const Ident empty_ident;
 
 static const char *op_table[] = {
@@ -12,18 +15,6 @@ static const char *op_table[] = {
 #include "x64.inc"
 #undef A
     0 /* A_END */
-};
-
-/* in QBE, 1/2/4/8 bytes ints are named B/H/W/L,
-   while X64 uses b/w/l/q (e.g. pushq). */
-enum {
-    X64_SZ_NONE = SZ_NONE,
-    X64_SZ_B = SZ_B,
-    X64_SZ_W = SZ_H,
-    X64_SZ_L = SZ_W,
-    X64_SZ_Q = SZ_L,
-    X64_SZ_S = SZ_S,
-    X64_SZ_D = SZ_D
 };
 
 static void dump_sz(uint8_t sz) {
@@ -161,7 +152,6 @@ static void dump_arg(AsmInstr ai, int i) {
         return;
     case AP_VREG: printf("%%.%u", ai.arg[i].vreg); return;
     case AP_STK_ARG: printf("%%.stk.%u", ai.arg[i].offset); return;
-    case AP_PREV_STK_ARG: printf("%%.pstk.%u", ai.arg[i].offset); return;
     case AP_ALLOC: printf("%%.alloc.%u", ai.arg[i].offset); return;
     }
     fail("unknown arg type");
@@ -815,7 +805,9 @@ static void isel(Instr instr) {
         return;
     case I_COPY: isel_copy(instr); return;
     case I_CALL:
-        /* TODO: implement isel: call */
+        /* TODO: implement isel: call
+           note: emit subq $0, %rsp in case of dynalloc usage,
+           and addq $0, %rsp after call */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_VASTART:
@@ -860,8 +852,8 @@ AsmFunc *isel_naive_x64(FuncDef *fd) {
         isel(*Instr_get(blk.jump_id));
     }
 
-    asm_func.instr[ctx.instr_cnt].t = A_UNKNOWN;
-    asm_func.label[ctx.label_cnt].ident = empty_ident;
-    asm_func.instr[2].arg[0].i64 = asm_func.alloc_sz; /* fix sub $0, %rsp */
+    /* ensure space for end marker (0) of instr and label */
+    assert(ctx.instr_cnt < countof(asm_func.instr));
+    assert(ctx.label_cnt < countof(asm_func.label));
     return &asm_func;
 }

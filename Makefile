@@ -3,7 +3,7 @@
 .SUFFIXES: .c .o
 
 COMMON_OBJ = main.o ir.o parse.o util.o dephi.o
-X64_OBJ = isel_naive.o
+X64_OBJ = isel_naive.o ra_naive.o
 OBJ = $(COMMON_OBJ) $(X64_OBJ)
 
 SRCALL = $(OBJ:.o=.c)

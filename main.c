@@ -35,10 +35,17 @@ static void x64(FuncDef *fd) {
         printf("\n####################\n");
         printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
+        dump_x64(af);
+    }
+
+    af = ra_naive_x64(af);
+
+    if (dump_debug_info) {
+        printf("\n####################\n");
+        printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
+        printf("####################\n\n");
     }
     dump_x64(af);
-
-    /* TODO: reg alloc */
 }
 
 static void dump_usage(void) {

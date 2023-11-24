@@ -69,3 +69,15 @@ enum AsmInstrType {
 #undef A
     A_END
 };
+
+/* in QBE, 1/2/4/8 bytes ints are named B/H/W/L,
+   while X64 uses b/w/l/q (e.g. pushq). */
+enum {
+    X64_SZ_NONE = SZ_NONE,
+    X64_SZ_B = SZ_B,
+    X64_SZ_W = SZ_H,
+    X64_SZ_L = SZ_W,
+    X64_SZ_Q = SZ_L,
+    X64_SZ_S = SZ_S,
+    X64_SZ_D = SZ_D
+};

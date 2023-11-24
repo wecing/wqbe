@@ -199,7 +199,9 @@ typedef struct AsmInstr {
         /* these are removed in reg alloc */
         AP_VREG,
         AP_STK_ARG, /* stack-passed params on current frame */
-        AP_PREV_STK_ARG, /* stack-passed params on caller's frame */
+        /* AP_PREV_STK_ARG,
+           stack-passed params on caller's frame;
+           on x64 this is just 16+n(%rbp) */
         AP_ALLOC /* static stack allocation; also used as reg save area */
     };
 
@@ -242,7 +244,7 @@ typedef struct AsmFunc {
     struct {
         Ident ident;
         uint32_t offset; /* index into instr, inclusive */
-    } label[128]; /* 1KB; ends with empty ident */
+    } label[128]; /* 1KB; ends with empty ident; sorted by offset */
     uint32_t stk_arg_sz;
     uint32_t alloc_sz;
     uint8_t has_dyn_alloc;
@@ -252,6 +254,7 @@ typedef struct AsmFunc {
 Ident Ident_from_str(const char *);
 const char *Ident_to_str(Ident);
 int Ident_eq(Ident, Ident);
+int Ident_is_empty(Ident);
 int Type_is_subty(Type);
 int Type_is_extty(Type);
 int Type_is_abity(Type);
@@ -294,3 +297,6 @@ void dephi(FuncDef *);
 /* isel_naive.c */
 void dump_x64(AsmFunc *);
 AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
+
+/* ra_naive.c */
+AsmFunc *ra_naive_x64(AsmFunc *);

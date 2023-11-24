@@ -78,6 +78,8 @@ const char *Ident_to_str(Ident s) {
 
 int Ident_eq(Ident x, Ident y) { return x.slot == y.slot && x.idx == y.idx; }
 
+int Ident_is_empty(Ident x) { return x.slot == 0 && x.idx == 0; }
+
 int Type_is_subty(Type t) {
     switch (t.t) {
     case TP_W: case TP_L: case TP_S: case TP_D:
