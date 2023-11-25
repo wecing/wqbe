@@ -19,6 +19,7 @@ static struct {
 #define O_LP (ctx.o_lp)
 
 static void visit_arg(AsmInstr *in, int idx) {
+    // ensure the whole union is zero-ed
     AsmInstrArg arg = {0};
 
     switch (in->arg_t[idx]) {
@@ -60,7 +61,31 @@ static void visit_instr(void) {
     AsmInstr in = IN.instr[I_IP];
     visit_arg(&in, 0);
     visit_arg(&in, 1);
-    // TODO: eliminate mem-mem ops; eliminate no-op jmp; fix call with dynalloc
+
+    // eliminate no-op jmp, e.g.:
+    //
+    //    bar
+    //    jmp .b
+    // .a: .b: .c:
+    //    baz
+    //
+    // becomes:
+    //
+    //    bar
+    // .a: .b: .c:
+    //    baz
+    if (in.t == A_JMP) {
+        uint32_t lp = I_LP;
+        while (IN.label[lp].offset == I_IP + 1) {
+            if (Ident_eq(IN.label[lp].ident, in.arg[0].sym.ident))
+                return; // skip current jmp
+            lp++;
+        }
+        emit_instr(in);
+        return;
+    }
+
+    // TODO: eliminate mem-mem (also sym-mem?) ops; fix call with dynalloc
     emit_instr(in);
 }
 
