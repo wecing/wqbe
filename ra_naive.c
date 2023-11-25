@@ -19,7 +19,7 @@ static struct {
 #define O_LP (ctx.o_lp)
 
 static void visit_arg(AsmInstr *in, int idx) {
-    // ensure the whole union is zero-ed
+    /* ensure the whole union is zero-ed */
     AsmInstrArg arg = {0};
 
     switch (in->arg_t[idx]) {
@@ -62,25 +62,27 @@ static void visit_instr(void) {
     visit_arg(&in, 0);
     visit_arg(&in, 1);
 
-    // eliminate no-op jmp, e.g.:
-    //
-    //    bar
-    //    jmp .b
-    // .a: .b: .c:
-    //    baz
-    //
-    // becomes:
-    //
-    //    bar
-    // .a: .b: .c:
-    //    baz
+    /* eliminate no-op jmp.
+       e.g.:                bar ; jmp .b
+                .a: .b: .c: baz
+       becomes:             bar
+                .a: .b: .c: baz */
     if (in.t == A_JMP) {
         uint32_t lp = I_LP;
         while (IN.label[lp].offset == I_IP + 1) {
             if (Ident_eq(IN.label[lp].ident, in.arg[0].sym.ident))
-                return; // skip current jmp
+                return; /* skip current jmp */
             lp++;
         }
+        emit_instr(in);
+        return;
+    }
+
+    /* skip other jmp ops, in which symbols could have different meanings */
+    if (in.t == A_JNE) {
+        /* note: we could also optimize
+           this: jne .a ; jmp .b ; .a: bar
+           to:   je  .b ;          .a: bar */
         emit_instr(in);
         return;
     }
