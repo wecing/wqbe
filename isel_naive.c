@@ -205,6 +205,8 @@ static struct {
         uint32_t offset; /* byte offset for AP_ALLOC */
     } tmp[1024]; /* 8KB */
     uint32_t tmp_cnt;
+
+    uint8_t is_first_blk;
 } ctx;
 
 static void record_tmp(Ident ident, uint32_t offset) {
@@ -546,6 +548,42 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
     return r; /* unreachable */
 }
 
+#define isel_alloc16 isel_alloc
+#define isel_alloc4  isel_alloc
+#define isel_alloc8  isel_alloc
+
+static void isel_alloc(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    if (ctx.is_first_blk && instr.u.args[0].t == V_CI) {
+        uint32_t sz = (instr.u.args[0].u.u64 + 7) & ~7;
+        if (instr.t == I_ALLOC16)
+            asm_func.alloc_sz = (asm_func.alloc_sz + 15) & ~15;
+        EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), ALLOC(dst));
+        asm_func.alloc_sz += sz;
+    } else {
+        asm_func.has_dyn_alloc = 1;
+        if (instr.u.args[0].t == V_CI) {
+            uint32_t sz = (instr.u.args[0].u.u64 + 7) & ~7;
+            if (instr.t == I_ALLOC16)
+                sz += 8;
+            EMIT2(SUB, Q, I64(sz), RSP);
+        } else {
+            VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
+            EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+            EMIT2(ADD, Q, I64(7), R10);
+            EMIT2(AND, Q, I64(~7), R10);
+            if (instr.t == I_ALLOC16)
+                EMIT2(ADD, Q, I64(8), R10);
+            EMIT2(SUB, Q, R10, RSP);
+        }
+        EMIT2(MOV, Q, RSP, ALLOC(dst));
+        if (instr.t == I_ALLOC16) {
+            EMIT2(ADD, Q, I64(15), ALLOC(dst));
+            EMIT2(AND, Q, I64(~15), ALLOC(dst));
+        }
+    }
+}
+
 static void isel_copy(Instr instr) {
     uint32_t tp_sz, copied_sz, d;
     VisitValueResult vvr;
@@ -725,9 +763,9 @@ static void isel(Instr instr) {
         /* TODO: implement isel: arith and bits */
         fail("not implemented: %s", op_name[instr.t]);
         return;
-    case I_ALLOC16:
-    case I_ALLOC4:
-    case I_ALLOC8:
+    case I_ALLOC4: isel_alloc4(instr); return;
+    case I_ALLOC8: isel_alloc8(instr); return;
+    case I_ALLOC16: isel_alloc16(instr); return;
     case I_BLIT:
     case I_LOADD:
     case I_LOADL:
@@ -844,6 +882,7 @@ AsmFunc *isel_naive_x64(FuncDef *fd) {
     emit_prologue();
 
     blk_id = ctx.fd.blk_id;
+    ctx.is_first_blk = 1;
     while (blk_id) {
         blk = *Block_get(blk_id);
         blk_id = blk.next_id;
@@ -857,6 +896,7 @@ AsmFunc *isel_naive_x64(FuncDef *fd) {
             isel(instr);
         }
         isel(*Instr_get(blk.jump_id));
+        ctx.is_first_blk = 0;
     }
 
     /* ensure space for end marker (0) of instr and label */

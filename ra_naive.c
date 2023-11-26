@@ -104,6 +104,8 @@ static void visit_instr(void) {
         AsmInstrArg tmp = {0};
 
         switch (in.t) {
+        case A_ADD:
+        case A_AND:
         case A_CMP:
         case A_LEA:
         case A_MOV:

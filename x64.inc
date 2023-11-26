@@ -1,3 +1,5 @@
+A(ADD,add)
+A(AND,and)
 A(CMP,cmp)
 A(JMP,jmp)
 A(JNE,jne)
