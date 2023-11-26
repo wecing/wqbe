@@ -180,8 +180,8 @@ void dump_x64(AsmFunc *f) {
         assert(ai.t < countof(op_table) - 1);
         printf("    %s", op_table[ai.t]);
         dump_sz(ai.size);
-        printf(" ");
         if (ai.arg_t[0] != AP_NONE) {
+            printf(" ");
             dump_arg(ai, 0);
             if (ai.arg_t[1] != AP_NONE) {
                 printf(", ");
@@ -240,6 +240,8 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define R10 MREG(R_R10,Q)
 #define R11 MREG(R_R11,Q)
 #define XMM0 MREG(R_XMM0,D)
+#define XMM8 MREG(R_XMM8,D)
+#define XMM9 MREG(R_XMM9,D)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
@@ -584,6 +586,54 @@ static void isel_alloc(Instr instr) {
     }
 }
 
+#define cmp_int_impl(op,s,xs,xop) \
+    static void isel_c##op##s(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
+        VisitValueResult y = visit_value(instr.u.args[1], R_R11); \
+        EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_R10,xs)); \
+        EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_R11,xs)); \
+        EMIT2(CMP, xs, MREG(R_R11,xs), MREG(R_R10,xs)); \
+        EMIT1(xop, NONE, ALLOC(dst)); \
+    }
+#define cmp_int(op,xop) \
+    cmp_int_impl(op,w,L,xop) \
+    cmp_int_impl(op,l,Q,xop)
+
+/* TODO: eq/ne for fp needs special treatment.
+   (ucomi NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
+#define cmp_sse_impl(op,s,xs,xop) \
+    static void isel_c##op##s(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_XMM8); \
+        VisitValueResult y = visit_value(instr.u.args[1], R_XMM9); \
+        EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
+        EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
+        EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
+        EMIT1(xop, NONE, ALLOC(dst)); \
+    }
+#define cmp_sse(op,xop) \
+    cmp_sse_impl(op,s,S,xop) \
+    cmp_sse_impl(op,d,D,xop)
+
+cmp_int(eq, SETE)
+cmp_int(ne, SETNE)
+cmp_int(sle, SETLE)
+cmp_int(slt, SETL)
+cmp_int(sge, SETGE)
+cmp_int(sgt, SETG)
+cmp_int(ule, SETBE)
+cmp_int(ult, SETB)
+cmp_int(uge, SETAE)
+cmp_int(ugt, SETA)
+
+cmp_sse(eq, SETE)
+cmp_sse(ne, SETNE)
+cmp_sse(le, SETLE)
+cmp_sse(lt, SETL)
+cmp_sse(ge, SETGE)
+cmp_sse(gt, SETG)
+
 static void isel_copy(Instr instr) {
     uint32_t tp_sz, copied_sz, d;
     VisitValueResult vvr;
@@ -763,9 +813,9 @@ static void isel(Instr instr) {
         /* TODO: implement isel: arith and bits */
         fail("not implemented: %s", op_name[instr.t]);
         return;
+    case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
-    case I_ALLOC16: isel_alloc16(instr); return;
     case I_BLIT:
     case I_LOADD:
     case I_LOADL:
@@ -786,43 +836,46 @@ static void isel(Instr instr) {
         /* TODO: implement isel: memory */
         fail("not implemented: %s", op_name[instr.t]);
         return;
-    case I_CEQD:
-    case I_CEQL:
-    case I_CEQS:
-    case I_CEQW:
-    case I_CGED:
-    case I_CGES:
-    case I_CGTD:
-    case I_CGTS:
-    case I_CLED:
-    case I_CLES:
-    case I_CLTD:
-    case I_CLTS:
-    case I_CNED:
-    case I_CNEL:
-    case I_CNES:
-    case I_CNEW:
+    case I_CEQD: isel_ceqd(instr); return;
+    case I_CEQL: isel_ceql(instr); return;
+    case I_CEQS: isel_ceqs(instr); return;
+    case I_CEQW: isel_ceqw(instr); return;
+    case I_CGED: isel_cged(instr); return;
+    case I_CGES: isel_cges(instr); return;
+    case I_CGTD: isel_cgtd(instr); return;
+    case I_CGTS: isel_cgts(instr); return;
+    case I_CLED: isel_cled(instr); return;
+    case I_CLES: isel_cles(instr); return;
+    case I_CLTD: isel_cltd(instr); return;
+    case I_CLTS: isel_clts(instr); return;
+    case I_CNED: isel_cned(instr); return;
+    case I_CNEL: isel_cnel(instr); return;
+    case I_CNES: isel_cnes(instr); return;
+    case I_CNEW: isel_cnew(instr); return;
     case I_COD:
     case I_COS:
-    case I_CSGEL:
-    case I_CSGEW:
-    case I_CSGTL:
-    case I_CSGTW:
-    case I_CSLEL:
-    case I_CSLEW:
-    case I_CSLTL:
-    case I_CSLTW:
-    case I_CUGEL:
-    case I_CUGEW:
-    case I_CUGTL:
-    case I_CUGTW:
-    case I_CULEL:
-    case I_CULEW:
-    case I_CULTL:
-    case I_CULTW:
+        /* TODO: implement isel: cmp ordered */
+        fail("not implemented: %s", op_name[instr.t]);
+        return;
+    case I_CSGEL: isel_csgel(instr); return;
+    case I_CSGEW: isel_csgew(instr); return;
+    case I_CSGTL: isel_csgtl(instr); return;
+    case I_CSGTW: isel_csgtw(instr); return;
+    case I_CSLEL: isel_cslel(instr); return;
+    case I_CSLEW: isel_cslew(instr); return;
+    case I_CSLTL: isel_csltl(instr); return;
+    case I_CSLTW: isel_csltw(instr); return;
+    case I_CUGEL: isel_cugel(instr); return;
+    case I_CUGEW: isel_cugew(instr); return;
+    case I_CUGTL: isel_cugtl(instr); return;
+    case I_CUGTW: isel_cugtw(instr); return;
+    case I_CULEL: isel_culel(instr); return;
+    case I_CULEW: isel_culew(instr); return;
+    case I_CULTL: isel_cultl(instr); return;
+    case I_CULTW: isel_cultw(instr); return;
     case I_CUOD:
     case I_CUOS:
-        /* TODO: implement isel: cmp */
+        /* TODO: implement isel: cmp unordered */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_DTOSI:
