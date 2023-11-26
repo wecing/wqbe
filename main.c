@@ -8,7 +8,7 @@ static int dump_debug_info = 0;
 static void dump_all(const char *prompt, ParseResult ir) {
     if (!dump_debug_info) return;
     if (prompt) {
-        printf("\n####################\n");
+        printf("####################\n");
         printf("### %s\n", prompt);
         printf("####################\n\n");
     }
@@ -16,6 +16,7 @@ static void dump_all(const char *prompt, ParseResult ir) {
     ir_dump_typedef();
     ir_dump_datadef(ir.first_datadef_id);
     ir_dump_funcdef(ir.first_funcdef_id);
+    printf("\n");
 }
 
 static void run_all_fd(uint16_t id, void (*f)(FuncDef *)) {
@@ -32,16 +33,17 @@ static void x64(FuncDef *fd) {
     af = isel_naive_x64(fd);
 
     if (dump_debug_info) {
-        printf("\n####################\n");
+        printf("####################\n");
         printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
         dump_x64(af);
+        printf("\n");
     }
 
     af = ra_naive_x64(af);
 
     if (dump_debug_info) {
-        printf("\n####################\n");
+        printf("####################\n");
         printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
     }

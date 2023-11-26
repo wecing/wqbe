@@ -29,7 +29,7 @@ static void visit_arg(AsmInstr *in, int idx) {
         fail("unexpected AP_VREG; not supported by naive reg alloc");
         return; /* unreachable */
     case AP_F32: case AP_F64:
-        return; // TODO: fix fp imm
+        return; /* TODO: fix fp imm */
     case AP_STK_ARG:
         arg.mreg.size = X64_SZ_Q;
         arg.mreg.mreg = R_RSP;
@@ -104,6 +104,7 @@ static void visit_instr(void) {
         AsmInstrArg tmp = {0};
 
         switch (in.t) {
+        case A_CMP:
         case A_LEA:
         case A_MOV:
         case A_MOVS:
