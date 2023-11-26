@@ -586,6 +586,8 @@ static void isel_alloc(Instr instr) {
     }
 }
 
+/* TODO: missing zero-init output. */
+
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
@@ -602,6 +604,7 @@ static void isel_alloc(Instr instr) {
 
 /* TODO: eq/ne for fp needs special treatment.
    (ucomi NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
+
 #define cmp_sse_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
