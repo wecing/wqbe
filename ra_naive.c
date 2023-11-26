@@ -57,6 +57,10 @@ static void emit_instr(AsmInstr x) {
     assert(O_IP < countof(OUT.instr));
 }
 
+static int is_mem_arg(uint8_t arg_t, AsmInstrArg arg) {
+    return arg_t == AP_SYM || (arg_t == AP_MREG && arg.mreg.is_deref);
+}
+
 static void visit_instr(void) {
     AsmInstr in = IN.instr[I_IP];
     visit_arg(&in, 0);
@@ -87,7 +91,52 @@ static void visit_instr(void) {
         return;
     }
 
-    // TODO: eliminate mem-mem (also sym-mem?) ops; fix call with dynalloc
+    /* eliminate mem-mem ops when not supported */
+    if (is_mem_arg(in.arg_t[0], in.arg[0]) &&
+        is_mem_arg(in.arg_t[1], in.arg[1])) {
+        static const char *op_table[] = {
+            0, /* A_UNKNOWN */
+#define A(up,low) #low,
+#include "x64.inc"
+#undef A
+            0 /* A_END */
+        };
+        AsmInstrArg tmp = {0};
+
+        switch (in.t) {
+        case A_LEA:
+        case A_MOV:
+        case A_MOVS:
+        case A_SUB:
+            break;
+        default:
+            fail("unsupported mem-mem op found: %s", op_table[in.t]);
+            return; /* unreachable */
+        }
+
+        /* leaq -16(%rbp), 8(%rsp)
+           => leaq -16(%rbp), %r11
+              movq %r11, 8(%rsp)
+
+           subq -16(%rbp), 8(%rsp)
+           => movq -16(%rbp), %r11
+              subq %r11, 8(%rsp)
+
+           movss -16(%rbp), 8(%rsp)
+           => movss -16(%rbp), %xmm8
+              movss %xmm8, 8(%rsp) */
+        tmp.mreg.size = in.size;
+        tmp.mreg.mreg = (in.size == SZ_S || in.size == SZ_D) ? R_XMM8 : R_R11;
+        emit_instr(in);
+        if (in.t != A_LEA) OUT.instr[O_IP - 1].t = A_MOV;
+        OUT.instr[O_IP - 1].arg[1] = tmp;
+        emit_instr(in);
+        if (in.t == A_LEA) OUT.instr[O_IP - 1].t = A_MOV;
+        OUT.instr[O_IP - 1].arg[0] = tmp;
+        return;
+    }
+
+    /* TODO: fix call with dynalloc */
     emit_instr(in);
 }
 

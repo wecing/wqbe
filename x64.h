@@ -59,6 +59,14 @@ enum {
     R_XMM5,
     R_XMM6,
     R_XMM7,
+    R_XMM8, /* scratch */
+    R_XMM9, /* scratch */
+    R_XMM10, /* scratch */
+    R_XMM11, /* scratch */
+    R_XMM12, /* scratch */
+    R_XMM13, /* scratch */
+    R_XMM14, /* scratch */
+    R_XMM15, /* scratch */
     R_END /* does not exist in x64 */
 };
 

@@ -125,16 +125,19 @@ static void dump_mreg(uint8_t mreg, uint8_t size) {
     fail("unrecognized machine register %d", mreg);
 }
 
+static void dump_label(Ident ident) {
+    const char *s = Ident_to_str(ident);
+    printf("%s%s", s[0] == '@' ? "." : "_", s+1);
+}
+
 static void dump_arg(AsmInstr ai, int i) {
-    const char *s;
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
     case AP_I64: printf("$%lld", ai.arg[i].i64); return;
     case AP_F32: printf("$%f", ai.arg[i].f32); return;
     case AP_F64: printf("$%lf", ai.arg[i].f64); return;
     case AP_SYM:
-        s = Ident_to_str(ai.arg[i].sym.ident);
-        printf("%s%s", s[0] == '@' ? "." : "", s+1);
+        dump_label(ai.arg[i].sym.ident);
         if (ai.t == A_JMP || ai.t == A_JNE)
             return;
         if (ai.arg[i].sym.is_got)
@@ -159,14 +162,18 @@ static void dump_arg(AsmInstr ai, int i) {
 
 void dump_x64(AsmFunc *f) {
     uint32_t i, lb = 0;
-    const char *s;
     AsmInstr ai;
+
+    printf(".text\n");
+    printf(".globl ");
+    dump_label(f->label[0].ident);
+    printf("\n");
 
     for (i = 0; f->instr[i].t; ++i) {
         while (f->label[lb].offset == i &&
                !Ident_eq(f->label[lb].ident, empty_ident)) {
-            s = Ident_to_str(f->label[lb].ident);
-            printf("%s%s:\n", s[0] == '@' ? "." : "", s+1);
+            dump_label(f->label[lb].ident);
+            printf(":\n");
             lb++;
         }
         ai = f->instr[i];
@@ -606,7 +613,7 @@ static void isel_jnz(Instr instr) {
        i64 is also allowed but higher 32 bits are discarded. */
     VisitValueResult vvr;
     vvr = visit_value(instr.u.jump.v, R_R10);
-    EMIT2(CMP, L, ARG(vvr.t, vvr.a), I64(0));
+    EMIT2(CMP, L, I64(0), ARG(vvr.t, vvr.a));
     EMIT1(JNE, NONE, SYM(instr.u.jump.dst));
     EMIT1(JMP, NONE, SYM(instr.u.jump.dst_else));
 }
