@@ -242,6 +242,8 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define XMM0 MREG(R_XMM0,D)
 #define XMM8 MREG(R_XMM8,D)
 #define XMM9 MREG(R_XMM9,D)
+#define EAX MREG(R_RAX,L)
+#define EDX MREG(R_RDX,L)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
@@ -515,7 +517,11 @@ typedef struct VisitValueResult {
     AsmInstrArg a;
 } VisitValueResult;
 
-/* avail_mreg is not guaranteed to be used */
+/* avail_mreg is not guaranteed to be used.
+
+   in fact, it will only be used for getting global symbol addr, so:
+   1. avail_mreg should always be an int reg;
+   2. is avail_mreg is used, input Value is guaranteed not to be FP. */
 static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
     VisitValueResult r = {0};
     switch (v.t) {
@@ -549,6 +555,128 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
     fail("unrecognized VALUE type");
     return r; /* unreachable */
 }
+
+#define arith_wlsd(op,ixop,fxop) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(ixop, L, ARG(x.t, x.a), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(ixop, Q, ARG(x.t, x.a), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_S) { \
+            EMIT2(MOV, S, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); /* R10 not used */ \
+            EMIT2(fxop, S, ARG(x.t, x.a), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_D) { \
+            EMIT2(MOV, D, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); /* R10 not used */ \
+            EMIT2(fxop, D, ARG(x.t, x.a), ALLOC(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+#define arith_wl(op,xop) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(xop, L, ARG(x.t, x.a), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(xop, Q, ARG(x.t, x.a), ALLOC(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+arith_wlsd(add, ADD, ADDS)
+arith_wlsd(sub, SUB, SUBS)
+arith_wlsd(mul, IMUL, MULS)
+
+arith_wl(or, OR)
+arith_wl(xor, XOR)
+arith_wl(and, AND)
+
+static void isel_div(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult x = visit_value(instr.u.args[0], R_RAX);
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(MOV, L, ARG(x.t, x.a), EAX);
+        x = visit_value(instr.u.args[1], R_R10);
+        EMIT1(IDIV, L, ARG(x.t, x.a));
+        EMIT2(MOV, L, EAX, ALLOC(dst));
+    } else if (instr.ret_t.t == TP_L) {
+        EMIT2(MOV, Q, ARG(x.t, x.a), RAX);
+        x = visit_value(instr.u.args[1], R_R10);
+        EMIT1(IDIV, Q, ARG(x.t, x.a));
+        EMIT2(MOV, Q, RAX, ALLOC(dst));
+    } else if (instr.ret_t.t == TP_S) {
+        EMIT2(MOV, S, ARG(x.t, x.a), ALLOC(dst));
+        x = visit_value(instr.u.args[1], R_R10); /* R10 not used */
+        EMIT2(DIVS, S, ARG(x.t, x.a), ALLOC(dst));
+    } else if (instr.ret_t.t == TP_D) {
+        EMIT2(MOV, D, ARG(x.t, x.a), ALLOC(dst));
+        x = visit_value(instr.u.args[1], R_R10); /* R10 not used */
+        EMIT2(DIVS, D, ARG(x.t, x.a), ALLOC(dst));
+    } else {
+        fail("unexpected return type");
+    }
+}
+
+#define int_div_rem(op,xop,r) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_RAX); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), EAX); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT1(xop, L, ARG(x.t, x.a)); \
+            EMIT2(MOV, L, MREG(r, L), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), RAX); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT1(xop, Q, ARG(x.t, x.a)); \
+            EMIT2(MOV, Q, MREG(r, Q), ALLOC(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+int_div_rem(udiv,DIV,R_RAX)
+int_div_rem(rem,IDIV,R_RDX)
+int_div_rem(urem,DIV,R_RDX)
+
+#define shift_wl(op,xop) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(MOV, B, ARG(x.t, x.a), MREG(R_RCX, B)); \
+            EMIT2(xop, L, MREG(R_RCX, B), ALLOC(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), ALLOC(dst)); \
+            x = visit_value(instr.u.args[1], R_R10); \
+            EMIT2(MOV, B, ARG(x.t, x.a), MREG(R_RCX, B)); \
+            EMIT2(xop, Q, MREG(R_RCX, B), ALLOC(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+shift_wl(sar, SAR)
+shift_wl(shl, SHL)
+shift_wl(shr, SHR)
 
 #define isel_alloc16 isel_alloc
 #define isel_alloc4  isel_alloc
@@ -607,6 +735,7 @@ static void isel_alloc(Instr instr) {
 #define cmp_sse_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        /* visit_value: xmm8/xmm9 not used */ \
         VisitValueResult x = visit_value(instr.u.args[0], R_XMM8); \
         VisitValueResult y = visit_value(instr.u.args[1], R_XMM9); \
         EMIT2(MOV, xs, I64(0), ALLOC(dst)); \
@@ -811,22 +940,22 @@ static void isel(Instr instr) {
 
     switch (instr.t) {
     /* arithmetic and bits */
-    case I_ADD:
-    case I_AND:
-    case I_DIV:
-    case I_MUL:
+    case I_ADD: isel_add(instr); return;
+    case I_AND: isel_and(instr); return;
+    case I_DIV: isel_div(instr); return;
+    case I_MUL: isel_mul(instr); return;
     case I_NEG:
-    case I_OR:
-    case I_REM:
-    case I_SAR:
-    case I_SHL:
-    case I_SHR:
-    case I_SUB:
-    case I_UDIV:
-    case I_UREM:
-    case I_XOR:
         fail("not implemented: %s", op_name[instr.t]);
         return;
+    case I_OR: isel_or(instr); return;
+    case I_REM: isel_rem(instr); return;
+    case I_SAR: isel_sar(instr); return;
+    case I_SHL: isel_shl(instr); return;
+    case I_SHR: isel_shr(instr); return;
+    case I_SUB: isel_sub(instr); return;
+    case I_UDIV: isel_udiv(instr); return;
+    case I_UREM: isel_urem(instr); return;
+    case I_XOR: isel_xor(instr); return;
     /* memory */
     case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;

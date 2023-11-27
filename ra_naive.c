@@ -105,12 +105,19 @@ static void visit_instr(void) {
 
         switch (in.t) {
         case A_ADD:
+        case A_ADDS:
         case A_AND:
         case A_CMP:
+        case A_DIVS:
+        case A_IMUL:
         case A_LEA:
         case A_MOV:
         case A_MOVS:
+        case A_MULS:
+        case A_OR:
         case A_SUB:
+        case A_SUBS:
+        case A_XOR:
             break;
         default:
             fail("unsupported mem-mem op found: %s", op_table[in.t]);
