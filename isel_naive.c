@@ -678,6 +678,26 @@ shift_wl(sar, SAR)
 shift_wl(shl, SHL)
 shift_wl(shr, SHR)
 
+static void isel_neg(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(MOV, L, ARG(vvr.t, vvr.a), ALLOC(dst));
+        EMIT1(NEG, L, ALLOC(dst));
+    } else if (instr.ret_t.t == TP_L) {
+        EMIT2(MOV, Q, ARG(vvr.t, vvr.a), ALLOC(dst));
+        EMIT1(NEG, Q, ALLOC(dst));
+    } else if (instr.ret_t.t == TP_S) {
+        EMIT2(MOVS, S, ARG(vvr.t, vvr.a), ALLOC(dst));
+        EMIT2(XOR, L, I64(1L << 31), ALLOC(dst));
+    } else if (instr.ret_t.t == TP_D) {
+        EMIT2(MOVS, D, ARG(vvr.t, vvr.a), ALLOC(dst));
+        EMIT2(XOR, Q, I64(1L << 63), ALLOC(dst));
+    } else {
+        fail("unexpected return type");
+    }
+}
+
 #define isel_alloc16 isel_alloc
 #define isel_alloc4  isel_alloc
 #define isel_alloc8  isel_alloc
@@ -944,9 +964,7 @@ static void isel(Instr instr) {
     case I_AND: isel_and(instr); return;
     case I_DIV: isel_div(instr); return;
     case I_MUL: isel_mul(instr); return;
-    case I_NEG:
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_NEG: isel_neg(instr); return;
     case I_OR: isel_or(instr); return;
     case I_REM: isel_rem(instr); return;
     case I_SAR: isel_sar(instr); return;
