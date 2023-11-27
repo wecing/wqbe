@@ -586,13 +586,12 @@ static void isel_alloc(Instr instr) {
     }
 }
 
-/* TODO: missing zero-init output. */
-
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
         VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
         VisitValueResult y = visit_value(instr.u.args[1], R_R11); \
+        EMIT2(MOV, xs, I64(0), ALLOC(dst)); \
         EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_R10,xs)); \
         EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_R11,xs)); \
         EMIT2(CMP, xs, MREG(R_R11,xs), MREG(R_R10,xs)); \
@@ -602,18 +601,28 @@ static void isel_alloc(Instr instr) {
     cmp_int_impl(op,w,L,xop) \
     cmp_int_impl(op,l,Q,xop)
 
-/* TODO: eq/ne for fp needs special treatment.
-   (ucomi NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
+/* eq/ne for fp needs special treatment.
+   (ucomisd NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
 
 #define cmp_sse_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
         VisitValueResult x = visit_value(instr.u.args[0], R_XMM8); \
         VisitValueResult y = visit_value(instr.u.args[1], R_XMM9); \
+        EMIT2(MOV, xs, I64(0), ALLOC(dst)); \
+        if (A_##xop == A_SETE || A_##xop == A_SETNE) \
+            EMIT2(MOV, xs, I64(0), MREG(R_R11,xs)); \
         EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
         EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
         EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
         EMIT1(xop, NONE, ALLOC(dst)); \
+        if (A_##xop == A_SETE) { \
+            EMIT1(SETNP, NONE, MREG(R_R11,B)); \
+            EMIT2(AND, xs, MREG(R_R11,xs), ALLOC(dst)); \
+        } else if (A_##xop == A_SETNE) { \
+            EMIT1(SETP, NONE, MREG(R_R11,B)); \
+            EMIT2(OR, xs, MREG(R_R11,xs), ALLOC(dst)); \
+        } \
     }
 #define cmp_sse(op,xop) \
     cmp_sse_impl(op,s,S,xop) \
@@ -636,6 +645,8 @@ cmp_sse(le, SETLE)
 cmp_sse(lt, SETL)
 cmp_sse(ge, SETGE)
 cmp_sse(gt, SETG)
+cmp_sse(o, SETNP)
+cmp_sse(uo, SETP)
 
 static void isel_copy(Instr instr) {
     uint32_t tp_sz, copied_sz, d;
@@ -799,6 +810,7 @@ static void isel(Instr instr) {
     };
 
     switch (instr.t) {
+    /* arithmetic and bits */
     case I_ADD:
     case I_AND:
     case I_DIV:
@@ -813,9 +825,9 @@ static void isel(Instr instr) {
     case I_UDIV:
     case I_UREM:
     case I_XOR:
-        /* TODO: implement isel: arith and bits */
         fail("not implemented: %s", op_name[instr.t]);
         return;
+    /* memory */
     case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
@@ -836,9 +848,9 @@ static void isel(Instr instr) {
     case I_STOREL:
     case I_STORES:
     case I_STOREW:
-        /* TODO: implement isel: memory */
         fail("not implemented: %s", op_name[instr.t]);
         return;
+    /* comparisons */
     case I_CEQD: isel_ceqd(instr); return;
     case I_CEQL: isel_ceql(instr); return;
     case I_CEQS: isel_ceqs(instr); return;
@@ -855,11 +867,8 @@ static void isel(Instr instr) {
     case I_CNEL: isel_cnel(instr); return;
     case I_CNES: isel_cnes(instr); return;
     case I_CNEW: isel_cnew(instr); return;
-    case I_COD:
-    case I_COS:
-        /* TODO: implement isel: cmp ordered */
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_COD: isel_cod(instr); return;
+    case I_COS: isel_cos(instr); return;
     case I_CSGEL: isel_csgel(instr); return;
     case I_CSGEW: isel_csgew(instr); return;
     case I_CSGTL: isel_csgtl(instr); return;
@@ -876,11 +885,9 @@ static void isel(Instr instr) {
     case I_CULEW: isel_culew(instr); return;
     case I_CULTL: isel_cultl(instr); return;
     case I_CULTW: isel_cultw(instr); return;
-    case I_CUOD:
-    case I_CUOS:
-        /* TODO: implement isel: cmp unordered */
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_CUOD: isel_cuod(instr); return;
+    case I_CUOS: isel_cuos(instr); return;
+    /* conversions */
     case I_DTOSI:
     case I_DTOUI:
     case I_EXTS:
@@ -897,23 +904,20 @@ static void isel(Instr instr) {
     case I_SWTOF:
     case I_UWTOF:
     case I_TRUNCD:
-        /* TODO: implement isel: conv */
         fail("not implemented: %s", op_name[instr.t]);
         return;
+    /* other ops */
     case I_CAST:
-        /* TODO: implement isel: cast & copy */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_COPY: isel_copy(instr); return;
     case I_CALL:
-        /* TODO: implement isel: call
-           note: emit subq $0, %rsp in case of dynalloc usage,
+        /* note: emit subq $0, %rsp in case of dynalloc usage,
            and addq $0, %rsp after call */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_VASTART:
     case I_VAARG:
-        /* TODO: implement isel: vastart & vaarg */
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_PHI: isel_phi(instr); return;
