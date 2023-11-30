@@ -4,9 +4,6 @@
 #include "all.h"
 #include "x64.h"
 
-/* TODO: struct copying codegen assumes 8-bit alignment.
-   also, there should be a helper method for it. */
-
 static const Ident empty_ident;
 
 static const char *op_table[] = {
@@ -406,6 +403,57 @@ static ClassifyResult classify(Type t) {
     return r;
 }
 
+static AsmInstrArg blit_offset(uint8_t t, AsmInstrArg a, uint32_t off) {
+    switch (t) {
+    case AP_MREG:
+        a.mreg.offset += off;
+        return a;
+    case AP_STK_ARG:
+    case AP_ALLOC:
+        a.offset += off;
+        return a;
+    }
+    fail("unexpected AsmInstrArg type");
+    return a; /* unreachable */
+}
+
+#define blit(r0,r1,sz) _blit(r0,r1,sz)
+#define _blit(t0,r0,t1,r1,sz) \
+    do { \
+        AsmInstrArg _blit_from = {0}; \
+        AsmInstrArg _blit_to = {0}; \
+        _blit_from r0; \
+        _blit_to r1; \
+        blit_impl((t0), _blit_from, (t1), _blit_to, sz); \
+    } while (0)
+
+/* note: from/to shall not use R11. */
+static void blit_impl(uint8_t from_t, AsmInstrArg from,
+                      uint8_t to_t, AsmInstrArg to,
+                      uint32_t sz) {
+#define SRC ARG(from_t, blit_offset(from_t, from, copied_sz))
+#define DST ARG(to_t, blit_offset(to_t, to, copied_sz))
+    uint32_t copied_sz = 0;
+    while (sz - copied_sz >= 8) {
+        EMIT2(MOV, Q, SRC, DST);
+        copied_sz += 8;
+    }
+    while (sz - copied_sz >= 4) {
+        EMIT2(MOV, L, SRC, DST);
+        copied_sz += 4;
+    }
+    while (sz - copied_sz >= 2) {
+        EMIT2(MOV, W, SRC, DST);
+        copied_sz += 2;
+    }
+    while (sz - copied_sz >= 1) {
+        EMIT2(MOV, B, SRC, DST);
+        copied_sz += 1;
+    }
+#undef DST
+#undef SRC
+}
+
 static void emit_prologue(void) {
     static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
     static uint8_t sse_regs[] = {
@@ -415,7 +463,6 @@ static void emit_prologue(void) {
     uint8_t reg;
     int i, j;
     uint32_t prev_stk_arg_size = 0;
-    uint32_t copied_sz, tp_sz;
     ClassifyResult cr;
 
     emit_label(ctx.fd.ident);
@@ -469,6 +516,7 @@ static void emit_prologue(void) {
                 LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
             }
         } else {
+            uint32_t tp_sz = Type_size(ctx.fd.params[i].t);
             /* use stack */
             record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
             if (ctx.fd.params[i].t.t == TP_AG) {
@@ -479,33 +527,8 @@ static void emit_prologue(void) {
                 asm_func.alloc_sz += 8;
             }
             /* copy to current frame */
-            copied_sz = 0;
-            tp_sz = Type_size(ctx.fd.params[i].t);
-            while (tp_sz - copied_sz >= 8) {
-                EMIT2(MOV, Q,
-                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
-                      ALLOC(asm_func.alloc_sz + copied_sz));
-                copied_sz += 8;
-            }
-            while (tp_sz - copied_sz >= 4) {
-                EMIT2(MOV, L,
-                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
-                      ALLOC(asm_func.alloc_sz + copied_sz));
-                copied_sz += 4;
-            }
-            while (tp_sz - copied_sz >= 2) {
-                EMIT2(MOV, W,
-                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
-                      ALLOC(asm_func.alloc_sz + copied_sz));
-                copied_sz += 2;
-            }
-            while (tp_sz - copied_sz >= 1) {
-                EMIT2(MOV, B,
-                      PREV_STK_ARG(prev_stk_arg_size + copied_sz),
-                      ALLOC(asm_func.alloc_sz + copied_sz));
-                copied_sz += 1;
-            }
-
+            blit(PREV_STK_ARG(prev_stk_arg_size), ALLOC(asm_func.alloc_sz),
+                 tp_sz);
             prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
             asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
         }
@@ -734,6 +757,14 @@ static void isel_alloc(Instr instr) {
     }
 }
 
+static void isel_blit(Instr instr) {
+    VisitValueResult src = visit_value(instr.u.args[0], R_R10);
+    VisitValueResult dst = visit_value(instr.u.args[1], R_RAX);
+    EMIT2(MOV, Q, ARG(src.t, src.a), R10);
+    EMIT2(MOV, Q, ARG(dst.t, dst.a), RAX);
+    blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), instr.blit_sz);
+}
+
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
@@ -798,41 +829,18 @@ cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
 
 static void isel_copy(Instr instr) {
-    uint32_t tp_sz, copied_sz, d;
-    VisitValueResult vvr;
-
-    vvr = visit_value(instr.u.args[0], R_R10);
+    VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
     if (instr.ret_t.t == TP_AG) {
+        uint32_t tp_sz = Type_size(instr.ret_t);
         /* output of copy op */
         EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz),
               ALLOC(find_or_alloc_tmp(instr.ident)));
         /* actual coping */
         EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
-        tp_sz = Type_size(instr.ret_t);
-        copied_sz = 0;
-        while (tp_sz - copied_sz >= 8) {
-            EMIT2(MOV, Q, MREG_OFF(R_R10, copied_sz),
-                  ALLOC(asm_func.alloc_sz + copied_sz));
-            copied_sz += 8;
-        }
-        while (tp_sz - copied_sz >= 4) {
-            EMIT2(MOV, L, MREG_OFF(R_R10, copied_sz),
-                  ALLOC(asm_func.alloc_sz + copied_sz));
-            copied_sz += 4;
-        }
-        while (tp_sz - copied_sz >= 2) {
-            EMIT2(MOV, W, MREG_OFF(R_R10, copied_sz),
-                  ALLOC(asm_func.alloc_sz + copied_sz));
-            copied_sz += 2;
-        }
-        while (tp_sz - copied_sz >= 1) {
-            EMIT2(MOV, B, MREG_OFF(R_R10, copied_sz),
-                  ALLOC(asm_func.alloc_sz + copied_sz));
-            copied_sz += 1;
-        }
+        blit(MREG_OFF(R_R10, 0), ALLOC(asm_func.alloc_sz), tp_sz);
         asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
     } else {
-        d = find_or_alloc_tmp(instr.ident);
+        uint32_t d = find_or_alloc_tmp(instr.ident);
         switch (instr.ret_t.t) {
         case TP_W: EMIT2(MOV, L, ARG(vvr.t, vvr.a), ALLOC(d)); break;
         case TP_L: EMIT2(MOV, Q, ARG(vvr.t, vvr.a), ALLOC(d)); break;
@@ -876,34 +884,10 @@ static void isel_ret(Instr instr) {
             ClassifyResult cr = classify(ctx.fd.ret_t);
             if (cr.fst == P_MEMORY) {
                 uint32_t tp_sz = Type_size(ctx.fd.ret_t);
-                uint32_t copied_sz = 0;
                 /* RAX: required by ABI */
                 EMIT2(MOV, Q, ALLOC(ctx.ret_ptr_alloc_offset), RAX);
                 EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
-                while (tp_sz - copied_sz >= 8) {
-                    EMIT2(MOV, Q,
-                          MREG_OFF(R_R10, copied_sz),
-                          MREG_OFF(R_RAX, copied_sz));
-                    copied_sz += 8;
-                }
-                while (tp_sz - copied_sz >= 4) {
-                    EMIT2(MOV, L,
-                          MREG_OFF(R_R10, copied_sz),
-                          MREG_OFF(R_RAX, copied_sz));
-                    copied_sz += 4;
-                }
-                while (tp_sz - copied_sz >= 2) {
-                    EMIT2(MOV, W,
-                          MREG_OFF(R_R10, copied_sz),
-                          MREG_OFF(R_RAX, copied_sz));
-                    copied_sz += 2;
-                }
-                while (tp_sz - copied_sz >= 1) {
-                    EMIT2(MOV, B,
-                          MREG_OFF(R_R10, copied_sz),
-                          MREG_OFF(R_RAX, copied_sz));
-                    copied_sz += 1;
-                }
+                blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), tp_sz);
             } else {
                 int i;
                 int used_int_regs = 0, used_sse_regs = 0;
@@ -978,7 +962,7 @@ static void isel(Instr instr) {
     case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
-    case I_BLIT:
+    case I_BLIT: isel_blit(instr); return;
     case I_LOADD:
     case I_LOADL:
     case I_LOADS:
