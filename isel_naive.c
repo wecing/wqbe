@@ -765,6 +765,57 @@ static void isel_blit(Instr instr) {
     blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), instr.blit_sz);
 }
 
+#define load_mem_simple(op,xs) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult p = visit_value(instr.u.args[0], R_R11); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R11); \
+        EMIT2(MOVS, xs, MREG_OFF(R_R11, 0), ALLOC(dst)); \
+    }
+
+load_mem_simple(loadl, Q)
+load_mem_simple(loads, S)
+load_mem_simple(loadd, D)
+
+#define load_mem_bhw(op,xqop,xqsz,xlop,xlsz) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        VisitValueResult p = visit_value(instr.u.args[0], R_R11); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R11); \
+        if (instr.ret_t.t == TP_L) { \
+            EMIT2(xqop, xqsz, MREG_OFF(R_R11, 0), MREG(R_R11, xqsz)); \
+            EMIT2(MOV, Q, MREG(R_R11, Q), ALLOC(dst)); \
+        } else { \
+            EMIT2(xlop, xlsz, MREG_OFF(R_R11, 0), MREG(R_R11, xlsz)); \
+            EMIT2(MOV, L, MREG(R_R11, L), ALLOC(dst)); \
+        } \
+    }
+
+load_mem_bhw(loadsw, MOVSL, Q, MOV,   L)
+load_mem_bhw(loaduw, MOV,   L, MOV,   L)
+load_mem_bhw(loadsh, MOVSW, Q, MOVSW, L)
+load_mem_bhw(loaduh, MOVZW, Q, MOVZW, L)
+load_mem_bhw(loadsb, MOVSB, Q, MOVSB, L)
+load_mem_bhw(loadub, MOVZB, Q, MOVZB, L)
+
+#define isel_loadw isel_loadsw
+
+#define store_mem(op,xs,tmp) \
+    static void isel_##op(Instr instr) { \
+        VisitValueResult v = visit_value(instr.u.args[0], tmp); \
+        VisitValueResult p = visit_value(instr.u.args[1], R_R10); \
+        EMIT2(MOV, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+        EMIT2(MOV, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
+    }
+
+store_mem(storeb, B, R_R11)
+store_mem(storeh, W, R_R11)
+store_mem(storew, L, R_R11)
+store_mem(storel, Q, R_R11)
+store_mem(stores, S, R_XMM8)
+store_mem(stored, D, R_XMM8)
+
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
@@ -963,24 +1014,22 @@ static void isel(Instr instr) {
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
     case I_BLIT: isel_blit(instr); return;
-    case I_LOADD:
-    case I_LOADL:
-    case I_LOADS:
-    case I_LOADSB:
-    case I_LOADSH:
-    case I_LOADSW:
-    case I_LOADUB:
-    case I_LOADUH:
-    case I_LOADUW:
-    case I_LOADW:
-    case I_STOREB:
-    case I_STORED:
-    case I_STOREH:
-    case I_STOREL:
-    case I_STORES:
-    case I_STOREW:
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_LOADD: isel_loadd(instr); return;
+    case I_LOADL: isel_loadl(instr); return;
+    case I_LOADS: isel_loads(instr); return;
+    case I_LOADSB: isel_loadsb(instr); return;
+    case I_LOADSH: isel_loadsh(instr); return;
+    case I_LOADSW: isel_loadsw(instr); return;
+    case I_LOADUB: isel_loadub(instr); return;
+    case I_LOADUH: isel_loaduh(instr); return;
+    case I_LOADUW: isel_loaduw(instr); return;
+    case I_LOADW: isel_loadw(instr); return;
+    case I_STOREB: isel_storeb(instr); return;
+    case I_STORED: isel_stored(instr); return;
+    case I_STOREH: isel_storeh(instr); return;
+    case I_STOREL: isel_storel(instr); return;
+    case I_STORES: isel_stores(instr); return;
+    case I_STOREW: isel_storew(instr); return;
     /* comparisons */
     case I_CEQD: isel_ceqd(instr); return;
     case I_CEQL: isel_ceql(instr); return;
