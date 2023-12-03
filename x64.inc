@@ -1,6 +1,7 @@
 A(ADD,add)
 A(ADDS,adds)
 A(AND,and)
+A(CALL,call)
 A(CMP,cmp)
 A(DIV,div)
 A(DIVS,divs)

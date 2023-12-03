@@ -198,7 +198,9 @@ typedef struct AsmInstr {
         AP_I64, AP_F32, AP_F64, AP_SYM, AP_MREG,
         /* these are removed in reg alloc */
         AP_VREG,
-        AP_STK_ARG, /* stack-passed params on current frame */
+        /* AP_STK_ARG,
+           stack-passed params on current frame;
+           on x64 this is just n(%rsp) */
         /* AP_PREV_STK_ARG,
            stack-passed params on caller's frame;
            on x64 this is just 16+n(%rbp) */

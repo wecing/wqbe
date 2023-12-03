@@ -135,7 +135,7 @@ static void dump_arg(AsmInstr ai, int i) {
     case AP_F64: printf("$%lf", ai.arg[i].f64); return;
     case AP_SYM:
         dump_label(ai.arg[i].sym.ident);
-        if (ai.t == A_JMP || ai.t == A_JNE)
+        if (ai.t == A_JMP || ai.t == A_JNE || ai.t == A_CALL)
             return;
         if (ai.arg[i].sym.is_got)
             printf("@GOTPCREL");
@@ -144,6 +144,8 @@ static void dump_arg(AsmInstr ai, int i) {
         printf("(%%rip)");
         return;
     case AP_MREG:
+        if (ai.t == A_CALL)
+            printf("*"); /* callq *%rax, callq *32(%rbp), etc */
         if (ai.arg[i].mreg.is_deref && ai.arg[i].mreg.offset)
             printf("%d", ai.arg[i].mreg.offset);
         if (ai.arg[i].mreg.is_deref) printf("(");
@@ -151,7 +153,6 @@ static void dump_arg(AsmInstr ai, int i) {
         if (ai.arg[i].mreg.is_deref) printf(")");
         return;
     case AP_VREG: printf("%%.%u", ai.arg[i].vreg); return;
-    case AP_STK_ARG: printf("%%.stk.%u", ai.arg[i].offset); return;
     case AP_ALLOC: printf("%%.alloc.%u", ai.arg[i].offset); return;
     }
     fail("unknown arg type");
@@ -250,6 +251,7 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
 #define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
 #define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
+#define STK_ARG(off) MREG_OFF(R_RSP, off)
 #define ARG(t,a) (t), =(a)
 
 /* each rN will be expanded to two args */
@@ -408,7 +410,6 @@ static AsmInstrArg blit_offset(uint8_t t, AsmInstrArg a, uint32_t off) {
     case AP_MREG:
         a.mreg.offset += off;
         return a;
-    case AP_STK_ARG:
     case AP_ALLOC:
         a.offset += off;
         return a;
@@ -903,6 +904,224 @@ static void isel_copy(Instr instr) {
     }
 }
 
+/* returns amount of stack used for passing args.
+   note that this also writes to RAX. */
+static uint32_t prep_call_args(Instr instr, uint32_t ret_ag) {
+    int i;
+    uint32_t stk_arg_sz = 0;
+    static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
+    static uint8_t sse_regs[] = {
+        R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7};
+    uint8_t used_int_regs = 0, used_sse_regs = 0;
+
+    /* if called func returns a large struct, provide output addr in %rdi, and
+       let callee directly write into it.
+       otherwise, manually copy return values after x64 call op. */
+    if (instr.ret_t.t == TP_AG && Type_size(instr.ret_t) > 16) {
+        EMIT2(LEA, Q, ALLOC(ret_ag), RDI);
+        used_int_regs++;
+    }
+
+    for (i = 0; instr.u.call.args[i].t.t != TP_UNKNOWN; ++i) {
+        VisitValueResult arg = visit_value(instr.u.call.args[i].v, R_R10);
+        int use_stack = (used_int_regs == countof(int_regs) &&
+                         used_sse_regs == countof(sse_regs));
+        ClassifyResult cr = {0};
+        uint32_t arg_sz;
+        if (i == 0 && instr.u.call.args[i].t.t == TP_NONE) {
+            /* QBE passes env using %rax,
+               which is incompatible with varargs ABI. */
+            EMIT2(MOV, Q, ARG(arg.t, arg.a), RAX);
+            continue;
+        } else {
+            cr = classify(instr.u.call.args[i].t);
+            arg_sz = Type_size(instr.u.call.args[i].t);
+        }
+
+        if (!use_stack) {
+            use_stack = cr.fst == P_MEMORY;
+            if (!use_stack) {
+                uint8_t ir_cnt = 0, sr_cnt = 0;
+                if (cr.fst == P_INTEGER) ir_cnt++;
+                else if (cr.fst == P_SSE) sr_cnt++;
+                if (cr.snd == P_INTEGER) ir_cnt++;
+                else if (cr.snd == P_SSE) sr_cnt++;
+                use_stack =
+                    used_int_regs + ir_cnt > countof(int_regs) ||
+                    used_sse_regs + sr_cnt > countof(sse_regs);
+            }
+        }
+
+        if (!use_stack && instr.u.call.args[i].t.t == TP_AG) {
+            /* use regs: aggregate type */
+            int j;
+            EMIT2(MOV, Q, ARG(arg.t, arg.a), R10);
+            for (j = 0; j < 2; ++j) {
+                if (((uint8_t *) &cr)[j] == P_INTEGER) {
+                    EMIT2(MOV, Q, MREG_OFF(R_R10, 0), FAKE);
+                    LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
+                } else if (((uint8_t *) &cr)[j] == P_SSE) {
+                    EMIT2(MOVS, D, MREG_OFF(R_R10, 0), FAKE);
+                    LAST_INSTR.arg[1].mreg.size = X64_SZ_D;
+                    LAST_INSTR.arg[1].mreg.mreg = sse_regs[used_sse_regs++];
+                }
+            }
+        } else if (!use_stack) {
+            /* use regs: other types */
+            switch (instr.u.call.args[i].t.t) {
+            case TP_W:
+                EMIT2(MOV, L, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_L;
+                LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
+                break;
+            case TP_L: case TP_NONE:
+                EMIT2(MOV, Q, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_Q;
+                LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
+                break;
+            case TP_S:
+                EMIT2(MOVS, S, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_S;
+                LAST_INSTR.arg[1].mreg.mreg = sse_regs[used_sse_regs++];
+                break;
+            case TP_D:
+                EMIT2(MOVS, D, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_D;
+                LAST_INSTR.arg[1].mreg.mreg = sse_regs[used_sse_regs++];
+                break;
+            case TP_SB: case TP_UB:
+                EMIT2(MOV, B, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_B;
+                LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
+                break;
+            case TP_SH: case TP_UH:
+                EMIT2(MOV, W, ARG(arg.t, arg.a), FAKE);
+                LAST_INSTR.arg[1].mreg.size = X64_SZ_W;
+                LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
+                break;
+            default:
+                fail("unexpected argument TYPE");
+                break; /* unreachable */
+            }
+        } else {
+            /* use stack */
+            switch (instr.u.call.args[i].t.t) {
+#define SRC ARG(arg.t, arg.a)
+#define DST STK_ARG(stk_arg_sz)
+            case TP_W: EMIT2(MOV, L, SRC, DST); break;
+            case TP_NONE:
+            case TP_L: EMIT2(MOV, Q, SRC, DST); break;
+            case TP_S: EMIT2(MOVS, S, SRC, DST); break;
+            case TP_D: EMIT2(MOVS, D, SRC, DST); break;
+            case TP_SB:
+            case TP_UB: EMIT2(MOV, B, SRC, DST); break;
+            case TP_SH:
+            case TP_UH: EMIT2(MOV, W, SRC, DST); break;
+            case TP_AG:
+                EMIT2(MOV, Q, ARG(arg.t, arg.a), R10);
+                blit(MREG_OFF(R_R10, 0), DST,
+                     Type_size(instr.u.call.args[i].t));
+                break;
+#undef DST
+#undef SRC
+            default:
+                fail("unexpected argument TYPE");
+                break; /* unreachable */
+            }
+
+            if (instr.u.call.args[i].t.t == TP_AG) {
+                stk_arg_sz += Type_size(instr.u.call.args[i].t);
+                stk_arg_sz = (stk_arg_sz + 7) & ~7;
+            } else {
+                stk_arg_sz += 8;
+            }
+        }
+    }
+
+    if (instr.u.call.va_begin_idx <= i) {
+        check(instr.u.call.args[0].t.t != TP_NONE,
+              "env and varargs are incompatible on x64");
+        EMIT2(MOV, B, I64(used_sse_regs), RAX);
+    }
+
+    return stk_arg_sz;
+}
+
+static void emit_call(Value f) {
+    VisitValueResult vvr;
+    switch (f.t) {
+    case V_CSYM:
+    case V_CTHS:
+        EMIT1(CALL, Q, SYM(f.u.global_ident));
+        return;
+    case V_CI:
+        EMIT2(MOV, Q, I64(f.u.u64), R10);
+        EMIT1(CALL, Q, R10);
+        return;
+    case V_TMP:
+        vvr = visit_value(f, R_R10);
+        EMIT1(CALL, Q, ARG(vvr.t, vvr.a));
+        return;
+    default:
+        fail("unexpected func VALUE type");
+        break; /* unreachable */
+    }
+}
+
+static void isel_call(Instr instr) {
+    uint32_t stk_arg_sz = 0;
+    uint32_t ret = 0, ret_ag = 0;
+    ClassifyResult cr;
+    int i;
+    int used_int_regs = 0, used_sse_regs = 0;
+
+    if (instr.ret_t.t != TP_NONE) {
+        ret = find_or_alloc_tmp(instr.ident);
+        if (instr.ret_t.t == TP_AG) {
+            if (Type_log_align(instr.ret_t) == 4) /* align=16 */
+                asm_func.alloc_sz = (asm_func.alloc_sz + 15) & ~15;
+            ret_ag = asm_func.alloc_sz;
+            asm_func.alloc_sz += Type_size(instr.ret_t);
+            asm_func.alloc_sz = (asm_func.alloc_sz + 7) & ~7;
+            EMIT2(LEA, Q, ALLOC(ret_ag), ALLOC(ret));
+        }
+    }
+
+    EMIT2(SUB, Q, I64(0), RSP); /* for dynalloc */
+    stk_arg_sz = prep_call_args(instr, ret_ag);
+    emit_call(instr.u.call.f);
+    EMIT2(ADD, Q, I64(0), RSP); /* for dynalloc */
+
+    /* handle return value */
+    cr = classify(instr.ret_t);
+    if (instr.ret_t.t == TP_AG) {
+        /* if cr.fst == P_MEMORY, nothing to be done here */
+        for (i = 0; i < 2; ++i) {
+            uint8_t *crp = (void *) &cr;
+            if (crp[i] == P_SSE) {
+                EMIT2(MOVS, D, FAKE, ALLOC(ret_ag + i * 8));
+                LAST_INSTR.arg[0].mreg.mreg =
+                    used_sse_regs == 0 ? R_XMM0 : R_XMM1;
+                LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
+                used_sse_regs++;
+            } else if (crp[i] == P_INTEGER) {
+                EMIT2(MOV, Q, FAKE, ALLOC(ret_ag + i * 8));
+                LAST_INSTR.arg[0].mreg.mreg =
+                    used_int_regs == 0 ? R_RAX : R_RDX;
+                used_int_regs++;
+            }
+        }
+    } else {
+        if (instr.ret_t.t == TP_S || instr.ret_t.t == TP_D)
+            EMIT2(MOVS, D, XMM0, ALLOC(ret));
+        else
+            EMIT2(MOV, Q, RAX, ALLOC(ret));
+    }
+
+    if (stk_arg_sz > asm_func.stk_arg_sz)
+        asm_func.stk_arg_sz = stk_arg_sz;
+}
+
 static void isel_phi(Instr instr) {
     (void)instr;
     fail("unexpected phi op");
@@ -944,11 +1163,6 @@ static void isel_ret(Instr instr) {
                 int used_int_regs = 0, used_sse_regs = 0;
                 uint8_t *crp = (void*) &cr;
                 EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
-                /* TODO: this is not always correct.
-                   e.g. the return type could be a struct {char[7]}, placed at
-                   0x7; movq from 0x7 is misaligned access. a better solution
-                   might be to copy the result into an on-stack well-aligned
-                   place, then move into %rax/%rdi/%xmm0/%xmm1. */
                 for (i = 0; i < 2; ++i) {
                     if (crp[i] == P_SSE) {
                         EMIT2(MOVS, D, MREG_OFF(R_R10, i * 8), FAKE);
@@ -1091,11 +1305,7 @@ static void isel(Instr instr) {
         fail("not implemented: %s", op_name[instr.t]);
         return;
     case I_COPY: isel_copy(instr); return;
-    case I_CALL:
-        /* note: emit subq $0, %rsp in case of dynalloc usage,
-           and addq $0, %rsp after call */
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
+    case I_CALL: isel_call(instr); return;
     case I_VASTART:
     case I_VAARG:
         fail("not implemented: %s", op_name[instr.t]);

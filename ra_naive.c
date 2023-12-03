@@ -30,14 +30,6 @@ static void visit_arg(AsmInstr *in, int idx) {
         return; /* unreachable */
     case AP_F32: case AP_F64:
         return; /* TODO: fix fp imm */
-    case AP_STK_ARG:
-        arg.mreg.size = X64_SZ_Q;
-        arg.mreg.mreg = R_RSP;
-        arg.mreg.is_deref = 1;
-        arg.mreg.offset = in->arg[idx].offset;
-        in->arg[idx] = arg;
-        in->arg_t[idx] = AP_MREG;
-        return;
     case AP_ALLOC:
         arg.mreg.size = X64_SZ_Q;
         arg.mreg.mreg = R_RBP;
@@ -87,6 +79,11 @@ static void visit_instr(void) {
         /* note: we could also optimize
            this: jne .a ; jmp .b ; .a: bar
            to:   je  .b ;          .a: bar */
+        emit_instr(in);
+        return;
+    }
+    /* same for call; symbols are used as-is */
+    if (in.t == A_CALL) {
         emit_instr(in);
         return;
     }
