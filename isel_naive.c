@@ -143,7 +143,8 @@ static void dump_arg(AsmInstr ai, int i) {
     case AP_F64: printf("$%lf", ai.arg[i].f64); return;
     case AP_SYM:
         dump_label(ai.arg[i].sym.ident);
-        if (ai.t == A_JMP || ai.t == A_JNE || ai.t == A_CALL)
+        if (ai.t == A_JMP || ai.t == A_JNE ||
+            ai.t == A_JE || ai.t == A_JL || ai.t == A_CALL)
             return;
         if (ai.arg[i].sym.is_got)
             printf("@GOTPCREL");

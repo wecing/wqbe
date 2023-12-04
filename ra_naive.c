@@ -9,7 +9,30 @@ static struct {
     uint32_t i_ip, i_lp;
     AsmFunc out;
     uint32_t o_ip, o_lp;
+
+    uint32_t fn_id;
 } ctx;
+
+static Ident rewrite_label(Ident ident) {
+    char buf[100];
+    if (Ident_to_str(ident)[0] != '@')
+        return ident; /* only rewrite local labels */
+    sprintf(buf, "@wqbe_ra_%u_%u_%u", ctx.fn_id, ident.slot, ident.idx);
+    return Ident_from_str(buf);
+}
+
+static AsmInstr rewrite_jmp_label(AsmInstr in) {
+    switch (in.t) {
+    case A_JMP:
+    case A_JNE:
+    case A_JE:
+    case A_JL:
+        in.arg[0].sym.ident = rewrite_label(in.arg[0].sym.ident);
+        return in;
+    }
+    fail("unexpected jump op");
+    return in; /* unreachable */
+}
 
 #define IN (*(ctx.in_ptr))
 #define OUT (ctx.out)
@@ -70,7 +93,7 @@ static void visit_instr(void) {
                 return; /* skip current jmp */
             lp++;
         }
-        emit_instr(in);
+        emit_instr(rewrite_jmp_label(in));
         return;
     }
 
@@ -79,10 +102,10 @@ static void visit_instr(void) {
         /* note: we could also optimize
            this: jne .a ; jmp .b ; .a: bar
            to:   je  .b ;          .a: bar */
-        emit_instr(in);
+        emit_instr(rewrite_jmp_label(in));
         return;
     }
-    /* same for je/call; symbols are used as-is */
+    /* same for call; symbols are used as-is */
     if (in.t == A_CALL) {
         emit_instr(in);
         return;
@@ -153,8 +176,10 @@ static void visit_instr(void) {
 }
 
 AsmFunc *ra_naive_x64(AsmFunc *in_ptr) {
+    uint32_t fn_id = ctx.fn_id;
     memset(&ctx, 0, sizeof(ctx));
     ctx.in_ptr = in_ptr;
+    ctx.fn_id = fn_id;
 
     /* ensure both are 16-byte aligned */
     IN.alloc_sz = (IN.alloc_sz + 15) & ~15;
@@ -171,7 +196,7 @@ AsmFunc *ra_naive_x64(AsmFunc *in_ptr) {
         /* copy labels for current input instr */
         while (!Ident_is_empty(IN.label[I_LP].ident) &&
                IN.label[I_LP].offset == I_IP) {
-            OUT.label[O_LP].ident = IN.label[I_LP].ident;
+            OUT.label[O_LP].ident = rewrite_label(IN.label[I_LP].ident);
             OUT.label[O_LP].offset = O_IP;
             I_LP++;
             O_LP++;
@@ -185,5 +210,6 @@ AsmFunc *ra_naive_x64(AsmFunc *in_ptr) {
     /* ensure space for end marker (0) of instr and label */
     assert(O_IP < countof(OUT.instr));
     assert(O_LP < countof(OUT.label));
+    ctx.fn_id++;
     return &ctx.out;
 }
