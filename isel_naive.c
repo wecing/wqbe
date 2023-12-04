@@ -117,9 +117,17 @@ static void dump_mreg(uint8_t mreg, uint8_t size) {
         case R_XMM5: printf("xmm5"); return;
         case R_XMM6: printf("xmm6"); return;
         case R_XMM7: printf("xmm7"); return;
+        case R_XMM8: printf("xmm8"); return;
+        case R_XMM9: printf("xmm9"); return;
+        case R_XMM10: printf("xmm10"); return;
+        case R_XMM11: printf("xmm11"); return;
+        case R_XMM12: printf("xmm12"); return;
+        case R_XMM13: printf("xmm13"); return;
+        case R_XMM14: printf("xmm14"); return;
+        case R_XMM15: printf("xmm15"); return;
         }
     }
-    fail("unrecognized machine register %d", mreg);
+    fail("unrecognized machine register %d; size = %d", mreg, size);
 }
 
 static void dump_label(Ident ident) {
@@ -205,6 +213,20 @@ static struct {
     uint32_t tmp_cnt;
 
     uint8_t is_first_blk;
+
+    /* on x64, va_list is defined as:
+
+       typedef struct {
+           unsigned int gp_offset;
+           unsigned int fp_offset;
+           void *overflow_arg_area;
+           void *reg_save_area;
+       } va_list[1]; */
+
+    uint32_t gp_offset;
+    uint32_t fp_offset;
+    /* overflow_arg_area is just %rbp+16 */
+    uint32_t reg_save_area; /* ALLOC offset */
 } ctx;
 
 static void record_tmp(Ident ident, uint32_t offset) {
@@ -459,6 +481,55 @@ static void blit_impl(uint8_t from_t, AsmInstrArg from,
 #undef SRC
 }
 
+static void emit_reg_save(uint8_t used_int_regs, uint8_t used_sse_regs) {
+    static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
+    static uint8_t sse_regs[] = {
+        R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7};
+    int blk_id = ctx.fd.blk_id, instr_id = 0;
+    Block blk;
+    Instr instr;
+    char buf[100];
+    Ident skip_label;
+    static int buf_suffix = 0;
+
+    while (blk_id) {
+        blk = *Block_get(blk_id);
+        blk_id = blk.next_id;
+        instr_id = blk.instr_id;
+        while (instr_id) {
+            instr = *Instr_get(instr_id);
+            instr_id = instr.next_id;
+            if (instr.t == I_VASTART)
+                goto proceed;
+        }
+    }
+    return;
+
+proceed:
+    ctx.gp_offset = used_int_regs * 8;
+    ctx.fp_offset = countof(int_regs) * 8 + used_sse_regs * 16;
+    ctx.reg_save_area = asm_func.alloc_sz;
+    asm_func.alloc_sz += countof(int_regs) * 8 + countof(sse_regs) * 16;
+    while (used_int_regs < countof(int_regs)) {
+        EMIT2(MOV, Q, FAKE, ALLOC(ctx.reg_save_area + used_int_regs * 8));
+        LAST_INSTR.arg[0].mreg.mreg = int_regs[used_int_regs];
+        used_int_regs++;
+    }
+    sprintf(buf, "@wqbe_reg_save_end_%d", buf_suffix++);
+    skip_label = Ident_from_str(buf);
+    EMIT2(CMP, B, I64(0), MREG(R_RAX, B));
+    EMIT1(JE, NONE, SYM(skip_label));
+    while (used_sse_regs < countof(sse_regs)) {
+        EMIT2(MOVS, D, FAKE,
+              ALLOC(ctx.reg_save_area + countof(int_regs) * 8 +
+                    used_sse_regs * 16));
+        LAST_INSTR.arg[0].mreg.size = X64_SZ_D;
+        LAST_INSTR.arg[0].mreg.mreg = sse_regs[used_sse_regs];
+        used_sse_regs++;
+    }
+    emit_label(skip_label);
+}
+
 static void emit_prologue(void) {
     static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
     static uint8_t sse_regs[] = {
@@ -538,6 +609,8 @@ static void emit_prologue(void) {
             asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
         }
     }
+
+    emit_reg_save(used_int_regs, used_sse_regs);
 }
 
 typedef struct VisitValueResult {
@@ -1321,15 +1394,97 @@ static void isel_call(Instr instr) {
 }
 
 static void isel_vastart(Instr instr) {
-    (void)instr;
-    fail("not implemented: vastart");
-    // TODO: vastart
+    VisitValueResult p = visit_value(instr.u.args[0], R_R10);
+    EMIT2(MOV, Q, ARG(p.t, p.a), R10);
+
+    EMIT2(MOV, L, I64(ctx.gp_offset), MREG_OFF(R_R10, 0));
+    EMIT2(MOV, L, I64(ctx.fp_offset), MREG_OFF(R_R10, 4));
+    EMIT2(LEA, Q, PREV_STK_ARG(0), MREG_OFF(R_R10, 8));
+    EMIT2(LEA, Q, ALLOC(ctx.reg_save_area), MREG_OFF(R_R10, 16));
 }
 
 static void isel_vaarg(Instr instr) {
-    (void)instr;
-    fail("not implemented: vaarg");
-    // TODO: vaarg
+    static uint32_t buf_suffix = 0;
+    char buf[100];
+    Ident else_label, end_label;
+
+    uint32_t r = find_or_alloc_tmp(instr.ident);
+    VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
+    EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+
+    sprintf(buf, "@wqbe_vaarg_%u", buf_suffix++);
+    else_label = Ident_from_str(buf);
+    sprintf(buf, "@wqbe_vaarg_%u", buf_suffix++);
+    end_label = Ident_from_str(buf);
+
+#define GP_OFFSET         MREG_OFF(R_R10,  0)
+#define FP_OFFSET         MREG_OFF(R_R10,  4)
+#define OVERFLOW_ARG_AREA MREG_OFF(R_R10,  8)
+#define REG_SAVE_AREA     MREG_OFF(R_R10, 16)
+    if (instr.ret_t.t == TP_S || instr.ret_t.t == TP_D) {
+        EMIT2(CMP, L, I64(6 * 8 + 8 * 16), FP_OFFSET);
+        EMIT1(JL, NONE, SYM(else_label));
+
+        /* if fp_offset >= 6 * 8 + 8 * 16:
+              *r = *overflow_arg_area;
+              overflow_arg_area += 8; */
+        EMIT2(MOV, Q, OVERFLOW_ARG_AREA, R11);
+        if (instr.ret_t.t == TP_S)
+            EMIT2(MOVS, S, MREG_OFF(R_R11, 0), ALLOC(r));
+        else
+            EMIT2(MOVS, D, MREG_OFF(R_R11, 0), ALLOC(r));
+        EMIT2(ADD, Q, I64(8), OVERFLOW_ARG_AREA);
+        EMIT1(JMP, NONE, SYM(end_label));
+
+        /* else:
+               *r = *(reg_save_area + fp_offset)
+               fp_offset += 16; */
+        emit_label(else_label);
+        EMIT2(MOV, Q, REG_SAVE_AREA, R11);
+        EMIT2(ADD, Q, FP_OFFSET, R11);
+        if (instr.ret_t.t == TP_S)
+            EMIT2(MOVS, S, MREG_OFF(R_R11, 0), ALLOC(r));
+        else
+            EMIT2(MOVS, D, MREG_OFF(R_R11, 0), ALLOC(r));
+        EMIT2(ADD, Q, I64(16), FP_OFFSET);
+
+        emit_label(end_label);
+    } else {
+        check(instr.ret_t.t == TP_W || instr.ret_t.t == TP_L,
+              "vaarg only supports wlsd");
+
+        EMIT2(CMP, L, I64(6 * 8), GP_OFFSET);
+        EMIT1(JL, NONE, SYM(else_label));
+
+        /* if gp_offset >= 6 * 8:
+               *r = *overflow_arg_area;
+               overflow_arg_area += 8; */
+        EMIT2(MOV, Q, OVERFLOW_ARG_AREA, R11);
+        if (instr.ret_t.t == TP_W)
+            EMIT2(MOV, L, MREG_OFF(R_R11, 0), ALLOC(r));
+        else
+            EMIT2(MOV, Q, MREG_OFF(R_R11, 0), ALLOC(r));
+        EMIT2(ADD, Q, I64(8), OVERFLOW_ARG_AREA);
+        EMIT1(JMP, NONE, SYM(end_label));
+
+        /* else:
+               *r = *(reg_save_area + gp_offset)
+               gp_offset += 8; */
+        emit_label(else_label);
+        EMIT2(MOV, Q, REG_SAVE_AREA, R11);
+        EMIT2(ADD, Q, GP_OFFSET, R11);
+        if (instr.ret_t.t == TP_W)
+            EMIT2(MOV, L, MREG_OFF(R_R11, 0), ALLOC(r));
+        else
+            EMIT2(MOV, Q, MREG_OFF(R_R11, 0), ALLOC(r));
+        EMIT2(ADD, Q, I64(8), GP_OFFSET);
+
+        emit_label(end_label);
+    }
+#undef REG_SAVE_AREA
+#undef OVERFLOW_ARG_AREA
+#undef FP_OFFSET
+#undef GP_OFFSET
 }
 
 static void isel_phi(Instr instr) {

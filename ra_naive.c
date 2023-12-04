@@ -75,14 +75,14 @@ static void visit_instr(void) {
     }
 
     /* skip other jmp ops, in which symbols could have different meanings */
-    if (in.t == A_JNE) {
+    if (in.t == A_JNE || in.t == A_JE || in.t == A_JL) {
         /* note: we could also optimize
            this: jne .a ; jmp .b ; .a: bar
            to:   je  .b ;          .a: bar */
         emit_instr(in);
         return;
     }
-    /* same for call; symbols are used as-is */
+    /* same for je/call; symbols are used as-is */
     if (in.t == A_CALL) {
         emit_instr(in);
         return;
