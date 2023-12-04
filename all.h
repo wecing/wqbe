@@ -292,6 +292,7 @@ ParseResult parse(FILE *);
 /* util.c */
 void check(int cond, const char *, ...); /* like assert(), but always enabled */
 void fail(const char *, ...);
+void dump_stacktrace(void);
 
 /* dephi.c */
 void dephi(FuncDef *);

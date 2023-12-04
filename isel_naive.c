@@ -1093,8 +1093,8 @@ static void isel_call(Instr instr) {
     EMIT2(ADD, Q, I64(0), RSP); /* for dynalloc */
 
     /* handle return value */
-    cr = classify(instr.ret_t);
     if (instr.ret_t.t == TP_AG) {
+        cr = classify(instr.ret_t);
         /* if cr.fst == P_MEMORY, nothing to be done here */
         for (i = 0; i < 2; ++i) {
             uint8_t *crp = (void *) &cr;

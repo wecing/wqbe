@@ -1,3 +1,4 @@
+#include <execinfo.h>
 #include <stdarg.h>
 #include <stdlib.h>
 
@@ -10,6 +11,7 @@ void check(int cond, const char *msg, ...) {
     vfprintf(stderr, msg, args);
     fputc('\n', stderr);
     va_end(args);
+    dump_stacktrace();
     exit(1);
 }
 
@@ -19,5 +21,17 @@ void fail(const char *msg, ...) {
     vfprintf(stderr, msg, args);
     fputc('\n', stderr);
     va_end(args);
+    dump_stacktrace();
     exit(1);
+}
+
+void dump_stacktrace(void) {
+    void* callstack[128];
+    int i, frames = backtrace(callstack, 128);
+    char** strs = backtrace_symbols(callstack, frames);
+    printf("\nstacktrace:\n");
+    for (i = 0; i < frames; ++i) {
+        printf("    %s\n", strs[i]);
+    }
+    free(strs);
 }

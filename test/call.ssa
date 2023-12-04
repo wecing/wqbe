@@ -1,0 +1,10 @@
+export function $f() {
+@start
+    ret
+}
+
+export function w $main() {
+@start
+    call $f()
+    ret 0
+}
