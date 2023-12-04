@@ -1053,9 +1053,29 @@ static void isel_ultof(Instr instr) {
 }
 
 static void isel_cast(Instr instr) {
-    (void) instr;
-    fail("not implemented: cast");
-    // TODO: cast
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10);
+    switch (instr.ret_t.t) {
+    case TP_W: /* f32 => i32 */
+        EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+        EMIT2(MOVQ, NONE, XMM8, ALLOC(dst));
+        return;
+    case TP_L: /* f64 => i64 */
+        EMIT2(MOVS, D, ARG(v.t, v.a), XMM8);
+        EMIT2(MOVQ, NONE, XMM8, ALLOC(dst));
+        return;
+    case TP_S: /* i32 => f32 */
+        EMIT2(MOV, L, ARG(v.t, v.a), R11D);
+        EMIT2(MOVQ, NONE, R11, XMM8);
+        EMIT2(MOVS, D, XMM8, ALLOC(dst));
+        return;
+    case TP_D: /* i64 => f64 */
+        EMIT2(MOV, Q, ARG(v.t, v.a), R11);
+        EMIT2(MOVQ, NONE, R11, XMM8);
+        EMIT2(MOVS, D, XMM8, ALLOC(dst));
+        return;
+    }
+    fail("illegal cast op argument");
 }
 
 static void isel_copy(Instr instr) {

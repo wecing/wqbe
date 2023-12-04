@@ -16,6 +16,7 @@ A(JMP,jmp)
 A(JNE,jne)
 A(LEA,lea)
 A(MOV,mov)
+A(MOVQ,movq) /* not MOV with size suffix; required for xmm <=> reg */
 A(MOVS,movs)
 A(MOVSB,movsb)
 A(MOVSL,movsl)
