@@ -1303,11 +1303,13 @@ static void isel_call(Instr instr) {
 static void isel_vastart(Instr instr) {
     (void)instr;
     fail("not implemented: vastart");
+    // TODO: vastart
 }
 
 static void isel_vaarg(Instr instr) {
     (void)instr;
     fail("not implemented: vaarg");
+    // TODO: vaarg
 }
 
 static void isel_phi(Instr instr) {
