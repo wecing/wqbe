@@ -125,9 +125,9 @@ static void visit_instr(void) {
            => leaq -16(%rbp), %r11
               movq %r11, 8(%rsp)
 
-           subq -16(%rbp), 8(%rsp)
-           => movq -16(%rbp), %r11
-              subq %r11, 8(%rsp)
+           subl -16(%rbp), 8(%rsp)
+           => movl -16(%rbp), %r11d
+              subl %r11d, 8(%rsp)
 
            movss -16(%rbp), 8(%rsp)
            => movss -16(%rbp), %xmm8
