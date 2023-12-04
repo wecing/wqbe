@@ -159,8 +159,8 @@ uint32_t Type_size(Type t) {
     case TP_L: case TP_D: return 8;
     case TP_AG:
         ag = &ag_type_pool[t.ag_id];
-        if (ag->size != 0) {
-            return ag->size;
+        if (ag->size != 0 || ag->is_opaque) {
+            return ag->size; /* zero-sized opaque is allowed */
         } else if (ag->is_union) {
             for (i = 0; ag->u.ub[i] != 0; ++i) {
                 s_sz = 0;
