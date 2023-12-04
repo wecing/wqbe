@@ -242,9 +242,13 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define XMM9 MREG(R_XMM9,D)
 #define EAX MREG(R_RAX,L)
 #define EDX MREG(R_RDX,L)
+#define ECX MREG(R_RCX,L)
+#define R11D MREG(R_R11,L)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
+#define F32(v) AP_F32, .f32=(v)
+#define F64(v) AP_F64, .f64=(v)
 #define ALLOC(n) AP_ALLOC, .offset=(n)
 #define SYM(id) AP_SYM, .sym=msym(id,0,0)
 #define SYM_GOT(id) AP_SYM, .sym=msym(id,1,0)
@@ -880,6 +884,180 @@ cmp_sse(gt, SETG)
 cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
 
+static void isel_truncd(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+    EMIT2(CVTSS2S, D, XMM8, XMM8);
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_exts(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    EMIT2(MOVS, D, ARG(v.t, v.a), XMM8);
+    EMIT2(CVTSD2S, S, XMM8, XMM8);
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_extsw(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    EMIT2(MOVSL, Q, ARG(v.t, v.a), R11);
+    EMIT2(MOV, Q, R11, ALLOC(dst));
+}
+
+static void isel_extuw(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    EMIT2(MOV, L, ARG(v.t, v.a), R11D);
+    EMIT2(MOV, Q, R11, ALLOC(dst));
+}
+
+#define ext_hb(op,xop) \
+    static void isel_##op(Instr instr) { \
+        uint32_t dst = find_or_alloc_tmp(instr.ident); \
+        /* R10 unused */ \
+        VisitValueResult v = visit_value(instr.u.args[0], R_R10); \
+        EMIT2(MOV, Q, ARG(v.t, v.a), R10); \
+        if (instr.ret_t.t == TP_W) \
+            EMIT2(xop, L, ARG(v.t, v.a), ALLOC(dst)); \
+        else \
+            EMIT2(xop, Q, ARG(v.t, v.a), ALLOC(dst)); \
+    }
+
+ext_hb(extsh, MOVSW)
+ext_hb(extuh, MOVZW)
+ext_hb(extsb, MOVSB)
+ext_hb(extub, MOVZB)
+
+static void isel_stosi(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(CVTTSS2SI, L, ARG(v.t, v.a), R11D);
+        EMIT2(MOV, L, R11D, ALLOC(dst));
+    } else {
+        EMIT2(CVTTSS2SI, Q, ARG(v.t, v.a), R11);
+        EMIT2(MOV, Q, R11, ALLOC(dst));
+    }
+}
+
+static void isel_stoui(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(CVTTSS2SI, Q, ARG(v.t, v.a), R11);
+    } else {
+        EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTTSS2SI, Q, XMM8, R11);
+        EMIT2(MOV, Q, R11, R10);
+        EMIT2(SAR, Q, I64(63), R10);
+        EMIT2(ADDS, S, F64(-9223372036854775808.0), XMM8);
+        EMIT2(CVTTSS2SI, Q, XMM8, RAX);
+        EMIT2(AND, Q, R10, RAX);
+        EMIT2(OR, Q, RAX, R11);
+    }
+    EMIT2(MOV, Q, R11, ALLOC(dst));
+}
+
+static void isel_dtosi(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(CVTTSD2SI, L, ARG(v.t, v.a), R11D);
+        EMIT2(MOV, L, R11D, ALLOC(dst));
+    } else {
+        EMIT2(CVTTSD2SI, Q, ARG(v.t, v.a), R11);
+        EMIT2(MOV, Q, R11, ALLOC(dst));
+    }
+}
+
+static void isel_dtoui(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(CVTTSD2SI, Q, ARG(v.t, v.a), R11);
+    } else {
+        EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTTSD2SI, Q, XMM8, R11);
+        EMIT2(MOV, Q, R11, R10);
+        EMIT2(SAR, Q, I64(63), R10);
+        EMIT2(ADDS, S, F64(-9223372036854775808.0), XMM8);
+        EMIT2(CVTTSD2SI, Q, XMM8, RAX);
+        EMIT2(AND, Q, R10, RAX);
+        EMIT2(OR, Q, RAX, R11);
+    }
+    EMIT2(MOV, Q, R11, ALLOC(dst));
+}
+
+static void isel_swtof(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_S)
+        EMIT2(CVTSI2S, S, ARG(v.t, v.a), XMM8);
+    else
+        EMIT2(CVTSI2S, D, ARG(v.t, v.a), XMM8);
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_uwtof(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
+    if (instr.ret_t.t == TP_S) {
+        EMIT2(MOV, L, ARG(v.t, v.a), R11D);
+        EMIT2(CVTSI2S, S, R11, XMM8);
+    } else {
+        EMIT2(MOV, L, ARG(v.t, v.a), R11D);
+        EMIT2(CVTSI2S, D, R11, XMM8);
+    }
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_sltof(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10);
+    if (instr.ret_t.t == TP_S)
+        EMIT2(CVTSI2S, S, ARG(v.t, v.a), XMM8);
+    else
+        EMIT2(CVTSI2S, D, ARG(v.t, v.a), XMM8);
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_ultof(Instr instr) {
+    uint32_t dst = find_or_alloc_tmp(instr.ident);
+    VisitValueResult v = visit_value(instr.u.args[0], R_R10);
+    EMIT2(MOV, Q, ARG(v.t, v.a), RAX);
+    EMIT2(AND, Q, I64(1), RAX);
+    EMIT2(MOV, Q, ARG(v.t, v.a), RDX);
+    EMIT2(SHR, Q, I64(63), RDX);
+    EMIT2(MOV, L, EDX, ECX);
+    EMIT2(MOV, Q, ARG(v.t, v.a), RSI);
+    EMIT2(SHR, Q, MREG(R_RCX, B), RSI);
+    EMIT2(OR, Q, RSI, RAX);
+    if (instr.ret_t.t == TP_S) {
+        EMIT2(CVTSI2S, S, RAX, XMM8);
+        EMIT2(MOV, Q, XMM8, RAX);
+        EMIT2(MOV, L, EDX, ECX);
+        EMIT2(SHL, L, I64(23), ECX);
+        EMIT2(ADD, L, ECX, EAX);
+    } else {
+        EMIT2(CVTSI2S, D, RAX, XMM8);
+        EMIT2(MOV, Q, XMM8, RAX);
+        EMIT2(MOV, Q, RDX, RCX);
+        EMIT2(SHL, Q, I64(52), RCX);
+        EMIT2(ADD, Q, RCX, RAX);
+    }
+    EMIT2(MOV, Q, RAX, XMM8);
+    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+}
+
+static void isel_cast(Instr instr) {
+    (void) instr;
+    fail("not implemented: cast");
+    // TODO: cast
+}
+
 static void isel_copy(Instr instr) {
     VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
     if (instr.ret_t.t == TP_AG) {
@@ -1122,6 +1300,16 @@ static void isel_call(Instr instr) {
         asm_func.stk_arg_sz = stk_arg_sz;
 }
 
+static void isel_vastart(Instr instr) {
+    (void)instr;
+    fail("not implemented: vastart");
+}
+
+static void isel_vaarg(Instr instr) {
+    (void)instr;
+    fail("not implemented: vaarg");
+}
+
 static void isel_phi(Instr instr) {
     (void)instr;
     fail("unexpected phi op");
@@ -1199,122 +1387,11 @@ static void isel_ret(Instr instr) {
 }
 
 static void isel(Instr instr) {
-    static const char *op_name[] = {
-        0,
-#define I(up,low) #low,
+    switch (instr.t) {
+#define I(up,low) \
+    case I_##up: isel_##low(instr); return;
 #include "instr.inc"
 #undef I
-        0
-    };
-
-    switch (instr.t) {
-    /* arithmetic and bits */
-    case I_ADD: isel_add(instr); return;
-    case I_AND: isel_and(instr); return;
-    case I_DIV: isel_div(instr); return;
-    case I_MUL: isel_mul(instr); return;
-    case I_NEG: isel_neg(instr); return;
-    case I_OR: isel_or(instr); return;
-    case I_REM: isel_rem(instr); return;
-    case I_SAR: isel_sar(instr); return;
-    case I_SHL: isel_shl(instr); return;
-    case I_SHR: isel_shr(instr); return;
-    case I_SUB: isel_sub(instr); return;
-    case I_UDIV: isel_udiv(instr); return;
-    case I_UREM: isel_urem(instr); return;
-    case I_XOR: isel_xor(instr); return;
-    /* memory */
-    case I_ALLOC16: isel_alloc16(instr); return;
-    case I_ALLOC4: isel_alloc4(instr); return;
-    case I_ALLOC8: isel_alloc8(instr); return;
-    case I_BLIT: isel_blit(instr); return;
-    case I_LOADD: isel_loadd(instr); return;
-    case I_LOADL: isel_loadl(instr); return;
-    case I_LOADS: isel_loads(instr); return;
-    case I_LOADSB: isel_loadsb(instr); return;
-    case I_LOADSH: isel_loadsh(instr); return;
-    case I_LOADSW: isel_loadsw(instr); return;
-    case I_LOADUB: isel_loadub(instr); return;
-    case I_LOADUH: isel_loaduh(instr); return;
-    case I_LOADUW: isel_loaduw(instr); return;
-    case I_LOADW: isel_loadw(instr); return;
-    case I_STOREB: isel_storeb(instr); return;
-    case I_STORED: isel_stored(instr); return;
-    case I_STOREH: isel_storeh(instr); return;
-    case I_STOREL: isel_storel(instr); return;
-    case I_STORES: isel_stores(instr); return;
-    case I_STOREW: isel_storew(instr); return;
-    /* comparisons */
-    case I_CEQD: isel_ceqd(instr); return;
-    case I_CEQL: isel_ceql(instr); return;
-    case I_CEQS: isel_ceqs(instr); return;
-    case I_CEQW: isel_ceqw(instr); return;
-    case I_CGED: isel_cged(instr); return;
-    case I_CGES: isel_cges(instr); return;
-    case I_CGTD: isel_cgtd(instr); return;
-    case I_CGTS: isel_cgts(instr); return;
-    case I_CLED: isel_cled(instr); return;
-    case I_CLES: isel_cles(instr); return;
-    case I_CLTD: isel_cltd(instr); return;
-    case I_CLTS: isel_clts(instr); return;
-    case I_CNED: isel_cned(instr); return;
-    case I_CNEL: isel_cnel(instr); return;
-    case I_CNES: isel_cnes(instr); return;
-    case I_CNEW: isel_cnew(instr); return;
-    case I_COD: isel_cod(instr); return;
-    case I_COS: isel_cos(instr); return;
-    case I_CSGEL: isel_csgel(instr); return;
-    case I_CSGEW: isel_csgew(instr); return;
-    case I_CSGTL: isel_csgtl(instr); return;
-    case I_CSGTW: isel_csgtw(instr); return;
-    case I_CSLEL: isel_cslel(instr); return;
-    case I_CSLEW: isel_cslew(instr); return;
-    case I_CSLTL: isel_csltl(instr); return;
-    case I_CSLTW: isel_csltw(instr); return;
-    case I_CUGEL: isel_cugel(instr); return;
-    case I_CUGEW: isel_cugew(instr); return;
-    case I_CUGTL: isel_cugtl(instr); return;
-    case I_CUGTW: isel_cugtw(instr); return;
-    case I_CULEL: isel_culel(instr); return;
-    case I_CULEW: isel_culew(instr); return;
-    case I_CULTL: isel_cultl(instr); return;
-    case I_CULTW: isel_cultw(instr); return;
-    case I_CUOD: isel_cuod(instr); return;
-    case I_CUOS: isel_cuos(instr); return;
-    /* conversions */
-    case I_DTOSI:
-    case I_DTOUI:
-    case I_EXTS:
-    case I_EXTSB:
-    case I_EXTSH:
-    case I_EXTSW:
-    case I_EXTUB:
-    case I_EXTUH:
-    case I_EXTUW:
-    case I_SLTOF:
-    case I_ULTOF:
-    case I_STOSI:
-    case I_STOUI:
-    case I_SWTOF:
-    case I_UWTOF:
-    case I_TRUNCD:
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
-    /* other ops */
-    case I_CAST:
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
-    case I_COPY: isel_copy(instr); return;
-    case I_CALL: isel_call(instr); return;
-    case I_VASTART:
-    case I_VAARG:
-        fail("not implemented: %s", op_name[instr.t]);
-        return;
-    case I_PHI: isel_phi(instr); return;
-    case I_HLT: isel_hlt(instr); return;
-    case I_JMP: isel_jmp(instr); return;
-    case I_JNZ: isel_jnz(instr); return;
-    case I_RET: isel_ret(instr); return;
     }
     fail("unrecognized instr type %d", instr.t);
 }

@@ -110,6 +110,11 @@ static void visit_instr(void) {
         case A_LEA:
         case A_MOV:
         case A_MOVS:
+        case A_MOVSB:
+        case A_MOVSL:
+        case A_MOVSW:
+        case A_MOVZB:
+        case A_MOVZW:
         case A_MULS:
         case A_OR:
         case A_SUB:
