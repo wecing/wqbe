@@ -163,7 +163,9 @@ static void visit_instr(void) {
         tmp.mreg.size = in.size;
         tmp.mreg.mreg = (in.size == SZ_S || in.size == SZ_D) ? R_XMM8 : R_R11;
         emit_instr(in);
-        if (in.t != A_LEA) OUT.instr[O_IP - 1].t = A_MOV;
+        if (in.t != A_LEA)
+            OUT.instr[O_IP - 1].t =
+                tmp.mreg.mreg == R_XMM8 ? A_MOVS : A_MOV;
         OUT.instr[O_IP - 1].arg[1] = tmp;
         emit_instr(in);
         if (in.t == A_LEA) OUT.instr[O_IP - 1].t = A_MOV;
