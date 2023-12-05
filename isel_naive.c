@@ -1441,13 +1441,13 @@ static void isel_vaarg(Instr instr) {
                *r = *(reg_save_area + fp_offset)
                fp_offset += 16; */
         emit_label(else_label);
-        EMIT2(MOV, Q, REG_SAVE_AREA, R11);
-        EMIT2(ADD, Q, FP_OFFSET, R11);
+        EMIT2(MOV, L, FP_OFFSET, R11D);
+        EMIT2(ADD, Q, REG_SAVE_AREA, R11);
         if (instr.ret_t.t == TP_S)
             EMIT2(MOVS, S, MREG_OFF(R_R11, 0), ALLOC(r));
         else
             EMIT2(MOVS, D, MREG_OFF(R_R11, 0), ALLOC(r));
-        EMIT2(ADD, Q, I64(16), FP_OFFSET);
+        EMIT2(ADD, L, I64(16), FP_OFFSET);
 
         emit_label(end_label);
     } else {
@@ -1472,13 +1472,13 @@ static void isel_vaarg(Instr instr) {
                *r = *(reg_save_area + gp_offset)
                gp_offset += 8; */
         emit_label(else_label);
-        EMIT2(MOV, Q, REG_SAVE_AREA, R11);
-        EMIT2(ADD, Q, GP_OFFSET, R11);
+        EMIT2(MOV, L, GP_OFFSET, R11D);
+        EMIT2(ADD, Q, REG_SAVE_AREA, R11);
         if (instr.ret_t.t == TP_W)
             EMIT2(MOV, L, MREG_OFF(R_R11, 0), ALLOC(r));
         else
             EMIT2(MOV, Q, MREG_OFF(R_R11, 0), ALLOC(r));
-        EMIT2(ADD, Q, I64(8), GP_OFFSET);
+        EMIT2(ADD, L, I64(8), GP_OFFSET);
 
         emit_label(end_label);
     }
