@@ -1313,7 +1313,7 @@ static uint32_t prep_call_args(Instr instr, uint32_t ret_ag) {
     if (instr.u.call.va_begin_idx <= i) {
         check(instr.u.call.args[0].t.t != TP_NONE,
               "env and varargs are incompatible on x64");
-        EMIT2(MOV, B, I64(used_sse_regs), RAX);
+        EMIT2(MOV, B, I64(used_sse_regs), MREG(R_RAX, B));
     }
 
     return stk_arg_sz;
