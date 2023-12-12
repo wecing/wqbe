@@ -226,7 +226,7 @@ static struct {
 
     uint32_t gp_offset;
     uint32_t fp_offset;
-    /* overflow_arg_area is just %rbp+16 */
+    uint32_t overflow_arg_area; /* PREV_STK_ARG offset */
     uint32_t reg_save_area; /* ALLOC offset */
 } ctx;
 
@@ -482,7 +482,8 @@ static void blit_impl(uint8_t from_t, AsmInstrArg from,
 #undef SRC
 }
 
-static void emit_reg_save(uint8_t used_int_regs, uint8_t used_sse_regs) {
+static void emit_reg_save(uint8_t used_int_regs, uint8_t used_sse_regs,
+                          uint32_t used_stk_size) {
     static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
     static uint8_t sse_regs[] = {
         R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7};
@@ -509,6 +510,7 @@ static void emit_reg_save(uint8_t used_int_regs, uint8_t used_sse_regs) {
 proceed:
     ctx.gp_offset = used_int_regs * 8;
     ctx.fp_offset = countof(int_regs) * 8 + used_sse_regs * 16;
+    ctx.overflow_arg_area = used_stk_size;
     ctx.reg_save_area = asm_func.alloc_sz;
     asm_func.alloc_sz += countof(int_regs) * 8 + countof(sse_regs) * 16;
     while (used_int_regs < countof(int_regs)) {
@@ -611,7 +613,7 @@ static void emit_prologue(void) {
         }
     }
 
-    emit_reg_save(used_int_regs, used_sse_regs);
+    emit_reg_save(used_int_regs, used_sse_regs, prev_stk_arg_size);
 }
 
 typedef struct VisitValueResult {
@@ -1400,7 +1402,7 @@ static void isel_vastart(Instr instr) {
 
     EMIT2(MOV, L, I64(ctx.gp_offset), MREG_OFF(R_R10, 0));
     EMIT2(MOV, L, I64(ctx.fp_offset), MREG_OFF(R_R10, 4));
-    EMIT2(LEA, Q, PREV_STK_ARG(0), MREG_OFF(R_R10, 8));
+    EMIT2(LEA, Q, PREV_STK_ARG(ctx.overflow_arg_area), MREG_OFF(R_R10, 8));
     EMIT2(LEA, Q, ALLOC(ctx.reg_save_area), MREG_OFF(R_R10, 16));
 }
 
