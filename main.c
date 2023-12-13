@@ -69,7 +69,6 @@ static void dump_usage(void) {
 int main(int argc, char *argv[]) {
     int i;
     FILE *f = 0;
-    ParseResult ir;
 
     assert(sizeof(Type) == 4);
     assert(sizeof(ArrType) == 8);

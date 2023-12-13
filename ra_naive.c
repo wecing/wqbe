@@ -65,7 +65,7 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
-        dd->linkage.sec_name = strdup("__TEXT");
+        dd->linkage.sec_name = strdup("__TEXT,__literal8");
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;
         *ctx.first_dd_id_ptr = dd_id;
@@ -88,7 +88,7 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
-        dd->linkage.sec_name = strdup("__TEXT");
+        dd->linkage.sec_name = strdup("__TEXT,__literal8");
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;
         *ctx.first_dd_id_ptr = dd_id;

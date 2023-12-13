@@ -171,15 +171,19 @@ void dump_x64(AsmFunc *f, Linkage lnk) {
     uint32_t i, lb = 0;
     AsmInstr ai;
 
-    printf(".text\n");
+    if (!lnk.is_section)
+        printf(".text\n");
+    else if (!lnk.sec_flags)
+        printf(".section %s\n", lnk.sec_name);
+    else
+        printf(".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
+
     if (lnk.is_export) {
         printf(".globl ");
         dump_label(f->label[0].ident);
         printf("\n");
     }
     check(!lnk.is_thread, "only DATADEF could have thread linkage");
-    if (lnk.is_section)
-        printf(".section %s\n", lnk.sec_name);
 
     for (i = 0; f->instr[i].t; ++i) {
         while (f->label[lb].offset == i &&
@@ -206,10 +210,88 @@ void dump_x64(AsmFunc *f, Linkage lnk) {
 }
 
 void dump_x64_data(DataDef dd) {
-    /* TODO: support thread-local */
-    check(!dd.linkage.is_thread, "thread-local not yet supported");
+    Linkage lnk = dd.linkage;
+    int i, j;
 
-    /* TODO: finish dump_x64_data() */
+    if (!lnk.is_section)
+        printf(".data\n");
+    else if (!lnk.sec_flags)
+        printf(".section %s\n", lnk.sec_name);
+    else
+        printf(".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
+
+    if (lnk.is_export) {
+        printf(".globl ");
+        dump_label(dd.ident);
+        printf("\n");
+    }
+    /* TODO: support thread-local */
+    check(!lnk.is_thread, "thread-local storage not yet supported");
+
+    printf(".p2align %d\n", dd.log_align >= 4 ? 4 : dd.log_align);
+
+    dump_label(dd.ident);
+    printf(":\n");
+
+    for (i = 0; !dd.items[i].is_dummy_item; ++i) {
+        Type tp;
+        if (!dd.items[i].is_ext_ty) {
+            printf(".zero %d\n", dd.items[i].u.zero_size);
+            continue;
+        }
+
+        tp = dd.items[i].u.ext_ty.t;
+        for (j = 0; dd.items[i].u.ext_ty.items[j].t != DI_UNKNOWN; ++j) {
+            DataItem it = dd.items[i].u.ext_ty.items[j];
+
+            switch (it.t) {
+            case DI_UNKNOWN:
+                fail("unreachable");
+                return; /* unreachable */
+            case DI_SYM_OFF:
+                printf(".quad ");
+                dump_label(it.u.sym_off.ident);
+                if (it.u.sym_off.offset)
+                    printf("%+d", it.u.sym_off.offset);
+                printf("\n");
+                continue; /* unreachable */
+            case DI_STR:
+                printf(".string \"%s\"\n", it.u.str);
+                continue;
+            case DI_CONST:
+                break;
+            }
+
+            switch (it.u.cst.t) {
+            case V_CI:
+                switch (tp.t) {
+                case TP_B:
+                    printf(".byte %u\n", (uint8_t) it.u.cst.u.u64);
+                    break;
+                case TP_H:
+                    printf(".word %u\n", (uint16_t) it.u.cst.u.u64);
+                    break;
+                case TP_W:
+                    printf(".long %u\n", (uint32_t) it.u.cst.u.u64);
+                    break;
+                case TP_L:
+                    printf(".quad 0x%llx\n", it.u.cst.u.u64);
+                    break;
+                default:
+                    fail("unsupported const type for DATADEF");
+                    break; /* unreachable */
+                }
+                break;
+            case V_CS: printf(".single %f\n", it.u.cst.u.s); break;
+            case V_CD: printf(".double %lf\n", it.u.cst.u.d); break;
+            default:
+                fail("unsupported const type for DATADEF");
+                break; /* unreachable */
+            }
+        }
+    }
+
+    printf("\n");
 }
 
 static AsmFunc asm_func;
@@ -686,13 +768,15 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
             x = visit_value(instr.u.args[1], R_R10); \
             EMIT2(ixop, Q, ARG(x.t, x.a), ALLOC(dst)); \
         } else if (instr.ret_t.t == TP_S) { \
-            EMIT2(MOV, S, ARG(x.t, x.a), ALLOC(dst)); \
+            EMIT2(MOVS, S, ARG(x.t, x.a), XMM8); \
             x = visit_value(instr.u.args[1], R_R10); /* R10 not used */ \
-            EMIT2(fxop, S, ARG(x.t, x.a), ALLOC(dst)); \
+            EMIT2(fxop, S, ARG(x.t, x.a), XMM8); \
+            EMIT2(MOVS, S, XMM8, ALLOC(dst)); \
         } else if (instr.ret_t.t == TP_D) { \
-            EMIT2(MOV, D, ARG(x.t, x.a), ALLOC(dst)); \
+            EMIT2(MOVS, D, ARG(x.t, x.a), XMM8); \
             x = visit_value(instr.u.args[1], R_R10); /* R10 not used */ \
-            EMIT2(fxop, D, ARG(x.t, x.a), ALLOC(dst)); \
+            EMIT2(fxop, D, ARG(x.t, x.a), XMM8); \
+            EMIT2(MOVS, D, XMM8, ALLOC(dst)); \
         } else { \
             fail("unexpected return type"); \
         } \
@@ -737,13 +821,15 @@ static void isel_div(Instr instr) {
         EMIT1(IDIV, Q, ARG(x.t, x.a));
         EMIT2(MOV, Q, RAX, ALLOC(dst));
     } else if (instr.ret_t.t == TP_S) {
-        EMIT2(MOV, S, ARG(x.t, x.a), ALLOC(dst));
+        EMIT2(MOVS, S, ARG(x.t, x.a), XMM8);
         x = visit_value(instr.u.args[1], R_R10); /* R10 not used */
-        EMIT2(DIVS, S, ARG(x.t, x.a), ALLOC(dst));
+        EMIT2(DIVS, S, ARG(x.t, x.a), XMM8);
+        EMIT2(MOVS, S, XMM8, ALLOC(dst));
     } else if (instr.ret_t.t == TP_D) {
-        EMIT2(MOV, D, ARG(x.t, x.a), ALLOC(dst));
+        EMIT2(MOVS, D, ARG(x.t, x.a), XMM8);
         x = visit_value(instr.u.args[1], R_R10); /* R10 not used */
-        EMIT2(DIVS, D, ARG(x.t, x.a), ALLOC(dst));
+        EMIT2(DIVS, D, ARG(x.t, x.a), XMM8);
+        EMIT2(MOVS, D, XMM8, ALLOC(dst));
     } else {
         fail("unexpected return type");
     }
@@ -894,21 +980,21 @@ load_mem_bhw(loadub, MOVZB, Q, MOVZB, L)
 
 #define isel_loadw isel_loadsw
 
-#define store_mem(op,xs,tmp) \
+#define store_mem(op,mv,xs,tmp) \
     static void isel_##op(Instr instr) { \
         VisitValueResult v = visit_value(instr.u.args[0], tmp); \
         VisitValueResult p = visit_value(instr.u.args[1], R_R10); \
-        EMIT2(MOV, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
+        EMIT2(mv, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
         EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
-        EMIT2(MOV, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
+        EMIT2(mv, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
     }
 
-store_mem(storeb, B, R_R11)
-store_mem(storeh, W, R_R11)
-store_mem(storew, L, R_R11)
-store_mem(storel, Q, R_R11)
-store_mem(stores, S, R_XMM8)
-store_mem(stored, D, R_XMM8)
+store_mem(storeb,  MOV, B, R_R11)
+store_mem(storeh,  MOV, W, R_R11)
+store_mem(storew,  MOV, L, R_R11)
+store_mem(storel,  MOV, Q, R_R11)
+store_mem(stores, MOVS, S, R_XMM8)
+store_mem(stored, MOVS, D, R_XMM8)
 
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
@@ -934,19 +1020,22 @@ store_mem(stored, D, R_XMM8)
         /* visit_value: xmm8/xmm9 not used */ \
         VisitValueResult x = visit_value(instr.u.args[0], R_XMM8); \
         VisitValueResult y = visit_value(instr.u.args[1], R_XMM9); \
-        EMIT2(MOV, xs, I64(0), ALLOC(dst)); \
+        if (instr.ret_t.t == TP_W) \
+            EMIT2(MOV, L, I64(0), ALLOC(dst)); \
+        else \
+            EMIT2(MOV, Q, I64(0), ALLOC(dst)); \
         if (A_##xop == A_SETE || A_##xop == A_SETNE) \
-            EMIT2(MOV, xs, I64(0), MREG(R_R11,xs)); \
-        EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
-        EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
+            EMIT2(MOV, Q, I64(0), MREG(R_R11,Q)); \
+        EMIT2(MOVS, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
+        EMIT2(MOVS, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
         EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
         EMIT1(xop, NONE, ALLOC(dst)); \
         if (A_##xop == A_SETE) { \
             EMIT1(SETNP, NONE, MREG(R_R11,B)); \
-            EMIT2(AND, xs, MREG(R_R11,xs), ALLOC(dst)); \
+            EMIT2(AND, B, MREG(R_R11,B), ALLOC(dst)); \
         } else if (A_##xop == A_SETNE) { \
             EMIT1(SETP, NONE, MREG(R_R11,B)); \
-            EMIT2(OR, xs, MREG(R_R11,xs), ALLOC(dst)); \
+            EMIT2(OR, B, MREG(R_R11,B), ALLOC(dst)); \
         } \
     }
 #define cmp_sse(op,xop) \
