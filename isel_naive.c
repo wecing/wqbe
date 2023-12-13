@@ -167,14 +167,19 @@ static void dump_arg(AsmInstr ai, int i) {
     fail("unknown arg type");
 }
 
-void dump_x64(AsmFunc *f) {
+void dump_x64(AsmFunc *f, Linkage lnk) {
     uint32_t i, lb = 0;
     AsmInstr ai;
 
     printf(".text\n");
-    printf(".globl ");
-    dump_label(f->label[0].ident);
-    printf("\n");
+    if (lnk.is_export) {
+        printf(".globl ");
+        dump_label(f->label[0].ident);
+        printf("\n");
+    }
+    check(!lnk.is_thread, "only DATADEF could have thread linkage");
+    if (lnk.is_section)
+        printf(".section %s\n", lnk.sec_name);
 
     for (i = 0; f->instr[i].t; ++i) {
         while (f->label[lb].offset == i &&
@@ -198,6 +203,13 @@ void dump_x64(AsmFunc *f) {
         printf("\n");
     }
     printf("\n");
+}
+
+void dump_x64_data(DataDef dd) {
+    /* TODO: support thread-local */
+    check(!dd.linkage.is_thread, "thread-local not yet supported");
+
+    /* TODO: finish dump_x64_data() */
 }
 
 static AsmFunc asm_func;

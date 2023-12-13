@@ -37,7 +37,7 @@ static void x64(FuncDef *fd) {
         printf("####################\n");
         printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
-        dump_x64(af);
+        dump_x64(af, fd->linkage);
         printf("\n");
     }
 
@@ -48,7 +48,16 @@ static void x64(FuncDef *fd) {
         printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
     }
-    dump_x64(af);
+    dump_x64(af, fd->linkage);
+}
+
+static void run_all_dd(uint16_t id, void (*f)(DataDef)) {
+    DataDef dd;
+    while (id) {
+        dd = *DataDef_get(id);
+        f(dd);
+        id = dd.next_id;
+    }
 }
 
 static void dump_usage(void) {
@@ -103,7 +112,7 @@ int main(int argc, char *argv[]) {
     dump_all("after dephi()");
 
     run_all_fd(ir.first_funcdef_id, x64);
-    /* TODO: also dump datadef */
+    run_all_dd(ir.first_datadef_id, dump_x64_data);
 
     ir_cleanup();
     return 0;

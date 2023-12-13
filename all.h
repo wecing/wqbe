@@ -298,7 +298,8 @@ void dump_stacktrace(void);
 void dephi(FuncDef *);
 
 /* isel_naive.c */
-void dump_x64(AsmFunc *);
+void dump_x64(AsmFunc *, Linkage);
+void dump_x64_data(DataDef);
 AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
 
 /* ra_naive.c */
