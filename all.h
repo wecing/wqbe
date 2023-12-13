@@ -302,4 +302,4 @@ void dump_x64(AsmFunc *);
 AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
 
 /* ra_naive.c */
-AsmFunc *ra_naive_x64(AsmFunc *);
+AsmFunc *ra_naive_x64(AsmFunc *, uint16_t *);

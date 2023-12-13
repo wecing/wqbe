@@ -4,8 +4,9 @@
 #include "all.h"
 
 static int dump_debug_info = 0;
+static ParseResult ir;
 
-static void dump_all(const char *prompt, ParseResult ir) {
+static void dump_all(const char *prompt) {
     if (!dump_debug_info) return;
     if (prompt) {
         printf("####################\n");
@@ -40,7 +41,7 @@ static void x64(FuncDef *fd) {
         printf("\n");
     }
 
-    af = ra_naive_x64(af);
+    af = ra_naive_x64(af, &ir.first_datadef_id);
 
     if (dump_debug_info) {
         printf("####################\n");
@@ -96,12 +97,13 @@ int main(int argc, char *argv[]) {
 
     ir = parse(f);
     if (f != stdin) fclose(f);
-    dump_all("after parse()", ir);
+    dump_all("after parse()");
 
     run_all_fd(ir.first_funcdef_id, dephi);
-    dump_all("after dephi()", ir);
+    dump_all("after dephi()");
 
     run_all_fd(ir.first_funcdef_id, x64);
+    /* TODO: also dump datadef */
 
     ir_cleanup();
     return 0;

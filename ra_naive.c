@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "all.h"
@@ -11,6 +12,7 @@ static struct {
     uint32_t o_ip, o_lp;
 
     uint32_t fn_id;
+    uint16_t *first_dd_id_ptr;
 } ctx;
 
 static Ident rewrite_label(Ident ident) {
@@ -41,6 +43,13 @@ static AsmInstr rewrite_jmp_label(AsmInstr in) {
 #define O_IP (ctx.o_ip)
 #define O_LP (ctx.o_lp)
 
+static Ident next_fp_ident(void) {
+    static int n = 0;
+    char buf[100];
+    sprintf(buf, "$.wqbe.fp.%d", n++);
+    return Ident_from_str(buf);
+}
+
 static void visit_arg(AsmInstr *in, int idx) {
     /* ensure the whole union is zero-ed */
     AsmInstrArg arg = {0};
@@ -51,8 +60,52 @@ static void visit_arg(AsmInstr *in, int idx) {
     case AP_VREG:
         fail("unexpected AP_VREG; not supported by naive reg alloc");
         return; /* unreachable */
-    case AP_F32: case AP_F64:
-        return; /* TODO: fix fp imm */
+    case AP_F32: {
+        uint32_t v = *(uint32_t *) &in->arg[idx].f32;
+        uint16_t dd_id = DataDef_alloc(next_fp_ident());
+        DataDef *dd = DataDef_get(dd_id);
+        dd->linkage.is_section = 1;
+        dd->linkage.sec_name = strdup("__TEXT");
+        dd->log_align = 3;
+        dd->next_id = *ctx.first_dd_id_ptr;
+        *ctx.first_dd_id_ptr = dd_id;
+        dd->items = calloc(2, sizeof(dd->items[0]));
+        dd->items[0].is_ext_ty = 1;
+        dd->items[0].u.ext_ty.t.t = TP_W;
+        dd->items[0].u.ext_ty.items =
+            calloc(2, sizeof(dd->items[0].u.ext_ty.items[0]));
+        dd->items[0].u.ext_ty.items[0].t = DI_CONST;
+        dd->items[0].u.ext_ty.items[0].u.cst.t = V_CI;
+        dd->items[0].u.ext_ty.items[0].u.cst.u.u64 = v;
+        dd->items[1].is_dummy_item = 1;
+        arg.sym.ident = dd->ident;
+        in->arg[idx] = arg;
+        in->arg_t[idx] = AP_SYM;
+        return;
+    }
+    case AP_F64: {
+        uint64_t v = *(uint64_t *) &in->arg[idx].f64;
+        uint16_t dd_id = DataDef_alloc(next_fp_ident());
+        DataDef *dd = DataDef_get(dd_id);
+        dd->linkage.is_section = 1;
+        dd->linkage.sec_name = strdup("__TEXT");
+        dd->log_align = 3;
+        dd->next_id = *ctx.first_dd_id_ptr;
+        *ctx.first_dd_id_ptr = dd_id;
+        dd->items = calloc(2, sizeof(dd->items[0]));
+        dd->items[0].is_ext_ty = 1;
+        dd->items[0].u.ext_ty.t.t = TP_L;
+        dd->items[0].u.ext_ty.items =
+            calloc(2, sizeof(dd->items[0].u.ext_ty.items[0]));
+        dd->items[0].u.ext_ty.items[0].t = DI_CONST;
+        dd->items[0].u.ext_ty.items[0].u.cst.t = V_CI;
+        dd->items[0].u.ext_ty.items[0].u.cst.u.u64 = v;
+        dd->items[1].is_dummy_item = 1;
+        arg.sym.ident = dd->ident;
+        in->arg[idx] = arg;
+        in->arg_t[idx] = AP_SYM;
+        return;
+    }
     case AP_ALLOC:
         arg.mreg.size = X64_SZ_Q;
         arg.mreg.mreg = R_RBP;
@@ -159,16 +212,22 @@ static void visit_instr(void) {
 
            movss -16(%rbp), 8(%rsp)
            => movss -16(%rbp), %xmm8
-              movss %xmm8, 8(%rsp) */
+              movss %xmm8, 8(%rsp)
+
+           subsd $.fp0(%rip), -12(%rbp)
+           => movsd $.fp0(%rip), %xmm8
+              subsd %xmm8, -12(%rbp) */
         tmp.mreg.size = in.size;
         tmp.mreg.mreg = (in.size == SZ_S || in.size == SZ_D) ? R_XMM8 : R_R11;
         emit_instr(in);
         if (in.t != A_LEA)
             OUT.instr[O_IP - 1].t =
                 tmp.mreg.mreg == R_XMM8 ? A_MOVS : A_MOV;
+        OUT.instr[O_IP - 1].arg_t[1] = AP_MREG;
         OUT.instr[O_IP - 1].arg[1] = tmp;
         emit_instr(in);
         if (in.t == A_LEA) OUT.instr[O_IP - 1].t = A_MOV;
+        OUT.instr[O_IP - 1].arg_t[0] = AP_MREG;
         OUT.instr[O_IP - 1].arg[0] = tmp;
         return;
     }
@@ -177,11 +236,12 @@ static void visit_instr(void) {
     emit_instr(in);
 }
 
-AsmFunc *ra_naive_x64(AsmFunc *in_ptr) {
+AsmFunc *ra_naive_x64(AsmFunc *in_ptr, uint16_t *first_datadef_id_ptr) {
     uint32_t fn_id = ctx.fn_id;
     memset(&ctx, 0, sizeof(ctx));
     ctx.in_ptr = in_ptr;
     ctx.fn_id = fn_id;
+    ctx.first_dd_id_ptr = first_datadef_id_ptr;
 
     /* ensure both are 16-byte aligned */
     IN.alloc_sz = (IN.alloc_sz + 15) & ~15;

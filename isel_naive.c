@@ -197,6 +197,7 @@ void dump_x64(AsmFunc *f) {
         }
         printf("\n");
     }
+    printf("\n");
 }
 
 static AsmFunc asm_func;
