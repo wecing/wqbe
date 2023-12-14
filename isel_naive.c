@@ -760,13 +760,27 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
         VisitValueResult x = visit_value(instr.u.args[0], R_R10); \
         if (instr.ret_t.t == TP_W) { \
-            EMIT2(MOV, L, ARG(x.t, x.a), ALLOC(dst)); \
-            x = visit_value(instr.u.args[1], R_R10); \
-            EMIT2(ixop, L, ARG(x.t, x.a), ALLOC(dst)); \
+            if (A_##ixop == A_IMUL) { \
+                EMIT2(MOV, L, ARG(x.t, x.a), R11D); \
+                x = visit_value(instr.u.args[1], R_R10); \
+                EMIT2(ixop, L, ARG(x.t, x.a), R11D); \
+                EMIT2(MOV, L, R11D, ALLOC(dst)); \
+            } else { \
+                EMIT2(MOV, L, ARG(x.t, x.a), ALLOC(dst)); \
+                x = visit_value(instr.u.args[1], R_R10); \
+                EMIT2(ixop, L, ARG(x.t, x.a), ALLOC(dst)); \
+            } \
         } else if (instr.ret_t.t == TP_L) { \
-            EMIT2(MOV, Q, ARG(x.t, x.a), ALLOC(dst)); \
-            x = visit_value(instr.u.args[1], R_R10); \
-            EMIT2(ixop, Q, ARG(x.t, x.a), ALLOC(dst)); \
+            if (A_##ixop == A_IMUL) { \
+                EMIT2(MOV, Q, ARG(x.t, x.a), R11); \
+                x = visit_value(instr.u.args[1], R_R10); \
+                EMIT2(ixop, Q, ARG(x.t, x.a), R11); \
+                EMIT2(MOV, Q, R11, ALLOC(dst)); \
+            } else { \
+                EMIT2(MOV, Q, ARG(x.t, x.a), ALLOC(dst)); \
+                x = visit_value(instr.u.args[1], R_R10); \
+                EMIT2(ixop, Q, ARG(x.t, x.a), ALLOC(dst)); \
+            } \
         } else if (instr.ret_t.t == TP_S) { \
             EMIT2(MOVS, S, ARG(x.t, x.a), XMM8); \
             x = visit_value(instr.u.args[1], R_R10); /* R10 not used */ \
@@ -945,17 +959,17 @@ static void isel_blit(Instr instr) {
     blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), instr.blit_sz);
 }
 
-#define load_mem_simple(op,xs) \
+#define load_mem_simple(op,mv,xs) \
     static void isel_##op(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
         VisitValueResult p = visit_value(instr.u.args[0], R_R11); \
         EMIT2(MOV, Q, ARG(p.t, p.a), R11); \
-        EMIT2(MOVS, xs, MREG_OFF(R_R11, 0), ALLOC(dst)); \
+        EMIT2(mv, xs, MREG_OFF(R_R11, 0), ALLOC(dst)); \
     }
 
-load_mem_simple(loadl, Q)
-load_mem_simple(loads, S)
-load_mem_simple(loadd, D)
+load_mem_simple(loadl,  MOV, Q)
+load_mem_simple(loads, MOVS, S)
+load_mem_simple(loadd, MOVS, D)
 
 #define load_mem_bhw(op,xqop,xqsz,xlop,xlsz) \
     static void isel_##op(Instr instr) { \
