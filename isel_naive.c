@@ -1131,7 +1131,7 @@ static void isel_stoui(Instr instr) {
         EMIT2(CVTTSS2SI, Q, XMM8, R11);
         EMIT2(MOV, Q, R11, R10);
         EMIT2(SAR, Q, I64(63), R10);
-        EMIT2(ADDS, S, F64(-9223372036854775808.0), XMM8);
+        EMIT2(ADDS, S, F32(-9223372036854775808.0), XMM8);
         EMIT2(CVTTSS2SI, Q, XMM8, RAX);
         EMIT2(AND, Q, R10, RAX);
         EMIT2(OR, Q, RAX, R11);
@@ -1157,11 +1157,11 @@ static void isel_dtoui(Instr instr) {
     if (instr.ret_t.t == TP_W) {
         EMIT2(CVTTSD2SI, Q, ARG(v.t, v.a), R11);
     } else {
-        EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+        EMIT2(MOVS, D, ARG(v.t, v.a), XMM8);
         EMIT2(CVTTSD2SI, Q, XMM8, R11);
         EMIT2(MOV, Q, R11, R10);
         EMIT2(SAR, Q, I64(63), R10);
-        EMIT2(ADDS, S, F64(-9223372036854775808.0), XMM8);
+        EMIT2(ADDS, D, F64(-9223372036854775808.0), XMM8);
         EMIT2(CVTTSD2SI, Q, XMM8, RAX);
         EMIT2(AND, Q, R10, RAX);
         EMIT2(OR, Q, RAX, R11);
