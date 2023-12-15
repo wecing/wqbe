@@ -655,8 +655,14 @@ static void emit_prologue(void) {
     }
 
     for (i = 0; ctx.fd.params[i].t.t != TP_UNKNOWN; ++i) {
-        check(!(i == 0 && ctx.fd.params[i].t.t == TP_NONE),
-              "env params not supported"); /* TODO: support env */
+        if (i == 0 && ctx.fd.params[i].t.t == TP_NONE) {
+            /* env params are passed via %rax */
+            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
+            EMIT2(MOV, Q, RAX, ALLOC(asm_func.alloc_sz));
+            asm_func.alloc_sz += 8;
+            continue;
+        }
+
         use_stack = (used_int_regs == countof(int_regs) &&
                      used_sse_regs == countof(sse_regs));
         if (!use_stack) {

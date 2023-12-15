@@ -591,7 +591,7 @@ static void expect_funcdef_params(FuncDef *fd) {
         check(!fd->is_varargs, "no params expected after '...'");
         skip_space();
         if (_peekc() == 'e') {
-            check(c != '\0', "only the first param could be 'env'");
+            check(c == '\0', "only the first param could be 'env'");
             expect_keyword("env");
             skip_space();
             check(_peekc() == '%', "%IDENT expected");
