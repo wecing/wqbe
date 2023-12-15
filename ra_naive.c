@@ -232,7 +232,22 @@ static void visit_instr(void) {
         return;
     }
 
-    /* TODO: fix call with dynalloc */
+    /* fix call with dynalloc */
+    if (I_IP > 2 && /* prologue might contain subq $0, %rsp */
+        (in.t == A_ADD || in.t == A_SUB) &&
+        in.arg_t[0] == AP_I64 &&
+        in.arg[0].i64 == 0 &&
+        in.arg_t[1] == AP_MREG &&
+        in.arg[1].mreg.size == X64_SZ_Q &&
+        in.arg[1].mreg.mreg == R_RSP &&
+        !in.arg[1].mreg.is_deref) {
+        /* rewrite addq $0, %rsp and subq $0, %rsp */
+        in.arg[0].i64 = IN.stk_arg_sz;
+        /* skip if no-op */
+        if (in.arg[0].i64 == 0)
+            return;
+    }
+
     emit_instr(in);
 }
 

@@ -1501,7 +1501,7 @@ static void isel_call(Instr instr) {
                 used_int_regs++;
             }
         }
-    } else {
+    } else if (instr.ret_t.t != TP_NONE) {
         if (instr.ret_t.t == TP_S || instr.ret_t.t == TP_D)
             EMIT2(MOVS, D, XMM0, ALLOC(ret));
         else
