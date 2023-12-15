@@ -35,4 +35,7 @@ fmt:
 		}" < $$F;                          \
 	done
 
-.PHONY: clean fmt
+check: wqbe
+	qbe/tools/test.sh all
+
+.PHONY: clean fmt check

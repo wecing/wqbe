@@ -1,9 +1,0 @@
-export function w $main() {
-@start
-@a
-    %v =w phi @start 1, @b 0
-@b
-    jnz %v, @exit, @a
-@exit
-    ret 0
-}

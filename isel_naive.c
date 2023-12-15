@@ -14,229 +14,229 @@ static const char *op_table[] = {
     0 /* A_END */
 };
 
-static void dump_sz(uint8_t sz) {
+static void dump_sz(uint8_t sz, FILE *f) {
     switch (sz) {
     case X64_SZ_NONE: return;
-    case X64_SZ_B: printf("b"); return;
-    case X64_SZ_W: printf("w"); return;
-    case X64_SZ_L: printf("l"); return;
-    case X64_SZ_Q: printf("q"); return;
-    case X64_SZ_S: printf("s"); return;
-    case X64_SZ_D: printf("d"); return;
+    case X64_SZ_B: fprintf(f, "b"); return;
+    case X64_SZ_W: fprintf(f, "w"); return;
+    case X64_SZ_L: fprintf(f, "l"); return;
+    case X64_SZ_Q: fprintf(f, "q"); return;
+    case X64_SZ_S: fprintf(f, "s"); return;
+    case X64_SZ_D: fprintf(f, "d"); return;
     }
     fail("unrecognized instr size");
 }
 
-static void dump_mreg(uint8_t mreg, uint8_t size) {
+static void dump_mreg(uint8_t mreg, uint8_t size, FILE *f) {
     assert(size != X64_SZ_NONE);
-    printf("%%");
+    fprintf(f, "%%");
     if (size == X64_SZ_Q) {
         switch (mreg) {
-        case R_RAX: printf("rax"); return;
-        case R_RBX: printf("rbx"); return;
-        case R_RCX: printf("rcx"); return;
-        case R_RDX: printf("rdx"); return;
-        case R_RSI: printf("rsi"); return;
-        case R_RDI: printf("rdi"); return;
-        case R_RBP: printf("rbp"); return;
-        case R_RSP: printf("rsp"); return;
-        case R_R8:  printf("r8");  return;
-        case R_R9:  printf("r9");  return;
-        case R_R10: printf("r10"); return;
-        case R_R11: printf("r11"); return;
-        case R_R12: printf("r12"); return;
-        case R_R13: printf("r13"); return;
-        case R_R14: printf("r14"); return;
-        case R_R15: printf("r15"); return;
+        case R_RAX: fprintf(f, "rax"); return;
+        case R_RBX: fprintf(f, "rbx"); return;
+        case R_RCX: fprintf(f, "rcx"); return;
+        case R_RDX: fprintf(f, "rdx"); return;
+        case R_RSI: fprintf(f, "rsi"); return;
+        case R_RDI: fprintf(f, "rdi"); return;
+        case R_RBP: fprintf(f, "rbp"); return;
+        case R_RSP: fprintf(f, "rsp"); return;
+        case R_R8:  fprintf(f, "r8");  return;
+        case R_R9:  fprintf(f, "r9");  return;
+        case R_R10: fprintf(f, "r10"); return;
+        case R_R11: fprintf(f, "r11"); return;
+        case R_R12: fprintf(f, "r12"); return;
+        case R_R13: fprintf(f, "r13"); return;
+        case R_R14: fprintf(f, "r14"); return;
+        case R_R15: fprintf(f, "r15"); return;
         }
     } else if (size == X64_SZ_L) {
         switch (mreg) {
-        case R_RAX: printf("eax"); return;
-        case R_RBX: printf("ebx"); return;
-        case R_RCX: printf("ecx"); return;
-        case R_RDX: printf("edx"); return;
-        case R_RSI: printf("esi"); return;
-        case R_RDI: printf("edi"); return;
-        case R_RBP: printf("ebp"); return;
-        case R_RSP: printf("esp"); return;
-        case R_R8:  printf("r8d"); return;
-        case R_R9:  printf("r9d"); return;
-        case R_R10: printf("r10d"); return;
-        case R_R11: printf("r11d"); return;
-        case R_R12: printf("r12d"); return;
-        case R_R13: printf("r13d"); return;
-        case R_R14: printf("r14d"); return;
-        case R_R15: printf("r15d"); return;
+        case R_RAX: fprintf(f, "eax"); return;
+        case R_RBX: fprintf(f, "ebx"); return;
+        case R_RCX: fprintf(f, "ecx"); return;
+        case R_RDX: fprintf(f, "edx"); return;
+        case R_RSI: fprintf(f, "esi"); return;
+        case R_RDI: fprintf(f, "edi"); return;
+        case R_RBP: fprintf(f, "ebp"); return;
+        case R_RSP: fprintf(f, "esp"); return;
+        case R_R8:  fprintf(f, "r8d"); return;
+        case R_R9:  fprintf(f, "r9d"); return;
+        case R_R10: fprintf(f, "r10d"); return;
+        case R_R11: fprintf(f, "r11d"); return;
+        case R_R12: fprintf(f, "r12d"); return;
+        case R_R13: fprintf(f, "r13d"); return;
+        case R_R14: fprintf(f, "r14d"); return;
+        case R_R15: fprintf(f, "r15d"); return;
         }
     } else if (size == X64_SZ_W) {
         switch (mreg) {
-        case R_RAX: printf("ax"); return;
-        case R_RBX: printf("bx"); return;
-        case R_RCX: printf("cx"); return;
-        case R_RDX: printf("dx"); return;
-        case R_RSI: printf("si"); return;
-        case R_RDI: printf("di"); return;
-        case R_RBP: printf("bp"); return;
-        case R_RSP: printf("sp"); return;
-        case R_R8:  printf("r8w"); return;
-        case R_R9:  printf("r9w"); return;
-        case R_R10: printf("r10w"); return;
-        case R_R11: printf("r11w"); return;
-        case R_R12: printf("r12w"); return;
-        case R_R13: printf("r13w"); return;
-        case R_R14: printf("r14w"); return;
-        case R_R15: printf("r15w"); return;
+        case R_RAX: fprintf(f, "ax"); return;
+        case R_RBX: fprintf(f, "bx"); return;
+        case R_RCX: fprintf(f, "cx"); return;
+        case R_RDX: fprintf(f, "dx"); return;
+        case R_RSI: fprintf(f, "si"); return;
+        case R_RDI: fprintf(f, "di"); return;
+        case R_RBP: fprintf(f, "bp"); return;
+        case R_RSP: fprintf(f, "sp"); return;
+        case R_R8:  fprintf(f, "r8w"); return;
+        case R_R9:  fprintf(f, "r9w"); return;
+        case R_R10: fprintf(f, "r10w"); return;
+        case R_R11: fprintf(f, "r11w"); return;
+        case R_R12: fprintf(f, "r12w"); return;
+        case R_R13: fprintf(f, "r13w"); return;
+        case R_R14: fprintf(f, "r14w"); return;
+        case R_R15: fprintf(f, "r15w"); return;
         }
     } else if (size == X64_SZ_B) {
         switch (mreg) {
-        case R_RAX: printf("al"); return;
-        case R_RBX: printf("bl"); return;
-        case R_RCX: printf("cl"); return;
-        case R_RDX: printf("dl"); return;
-        case R_RSI: printf("sil"); return;
-        case R_RDI: printf("dil"); return;
-        case R_RBP: printf("bpl"); return;
-        case R_RSP: printf("spl"); return;
-        case R_R8:  printf("r8b"); return;
-        case R_R9:  printf("r9b"); return;
-        case R_R10: printf("r10b"); return;
-        case R_R11: printf("r11b"); return;
-        case R_R12: printf("r12b"); return;
-        case R_R13: printf("r13b"); return;
-        case R_R14: printf("r14b"); return;
-        case R_R15: printf("r15b"); return;
+        case R_RAX: fprintf(f, "al"); return;
+        case R_RBX: fprintf(f, "bl"); return;
+        case R_RCX: fprintf(f, "cl"); return;
+        case R_RDX: fprintf(f, "dl"); return;
+        case R_RSI: fprintf(f, "sil"); return;
+        case R_RDI: fprintf(f, "dil"); return;
+        case R_RBP: fprintf(f, "bpl"); return;
+        case R_RSP: fprintf(f, "spl"); return;
+        case R_R8:  fprintf(f, "r8b"); return;
+        case R_R9:  fprintf(f, "r9b"); return;
+        case R_R10: fprintf(f, "r10b"); return;
+        case R_R11: fprintf(f, "r11b"); return;
+        case R_R12: fprintf(f, "r12b"); return;
+        case R_R13: fprintf(f, "r13b"); return;
+        case R_R14: fprintf(f, "r14b"); return;
+        case R_R15: fprintf(f, "r15b"); return;
         }
     } else {
         assert(size == X64_SZ_S || size == X64_SZ_D);
         switch (mreg) {
-        case R_XMM0: printf("xmm0"); return;
-        case R_XMM1: printf("xmm1"); return;
-        case R_XMM2: printf("xmm2"); return;
-        case R_XMM3: printf("xmm3"); return;
-        case R_XMM4: printf("xmm4"); return;
-        case R_XMM5: printf("xmm5"); return;
-        case R_XMM6: printf("xmm6"); return;
-        case R_XMM7: printf("xmm7"); return;
-        case R_XMM8: printf("xmm8"); return;
-        case R_XMM9: printf("xmm9"); return;
-        case R_XMM10: printf("xmm10"); return;
-        case R_XMM11: printf("xmm11"); return;
-        case R_XMM12: printf("xmm12"); return;
-        case R_XMM13: printf("xmm13"); return;
-        case R_XMM14: printf("xmm14"); return;
-        case R_XMM15: printf("xmm15"); return;
+        case R_XMM0: fprintf(f, "xmm0"); return;
+        case R_XMM1: fprintf(f, "xmm1"); return;
+        case R_XMM2: fprintf(f, "xmm2"); return;
+        case R_XMM3: fprintf(f, "xmm3"); return;
+        case R_XMM4: fprintf(f, "xmm4"); return;
+        case R_XMM5: fprintf(f, "xmm5"); return;
+        case R_XMM6: fprintf(f, "xmm6"); return;
+        case R_XMM7: fprintf(f, "xmm7"); return;
+        case R_XMM8: fprintf(f, "xmm8"); return;
+        case R_XMM9: fprintf(f, "xmm9"); return;
+        case R_XMM10: fprintf(f, "xmm10"); return;
+        case R_XMM11: fprintf(f, "xmm11"); return;
+        case R_XMM12: fprintf(f, "xmm12"); return;
+        case R_XMM13: fprintf(f, "xmm13"); return;
+        case R_XMM14: fprintf(f, "xmm14"); return;
+        case R_XMM15: fprintf(f, "xmm15"); return;
         }
     }
     fail("unrecognized machine register %d; size = %d", mreg, size);
 }
 
-static void dump_label(Ident ident) {
+static void dump_label(Ident ident, FILE *f) {
     const char *s = Ident_to_str(ident);
-    printf("%s%s", s[0] == '@' ? "." : "_", s+1);
+    fprintf(f, "%s%s", s[0] == '@' ? "." : "_", s+1);
 }
 
-static void dump_arg(AsmInstr ai, int i) {
+static void dump_arg(AsmInstr ai, int i, FILE *f) {
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
-    case AP_I64: printf("$%lld", ai.arg[i].i64); return;
-    case AP_F32: printf("$%f", ai.arg[i].f32); return;
-    case AP_F64: printf("$%lf", ai.arg[i].f64); return;
+    case AP_I64: fprintf(f, "$%lld", ai.arg[i].i64); return;
+    case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
+    case AP_F64: fprintf(f, "$%lf", ai.arg[i].f64); return;
     case AP_SYM:
-        dump_label(ai.arg[i].sym.ident);
+        dump_label(ai.arg[i].sym.ident, f);
         if (ai.t == A_JMP || ai.t == A_JNE ||
             ai.t == A_JE || ai.t == A_JL || ai.t == A_CALL)
             return;
         if (ai.arg[i].sym.is_got)
-            printf("@GOTPCREL");
+            fprintf(f, "@GOTPCREL");
         else if (ai.arg[i].sym.offset)
-            printf("%+d", ai.arg[i].sym.offset);
-        printf("(%%rip)");
+            fprintf(f, "%+d", ai.arg[i].sym.offset);
+        fprintf(f, "(%%rip)");
         return;
     case AP_MREG:
         if (ai.t == A_CALL)
-            printf("*"); /* callq *%rax, callq *32(%rbp), etc */
+            fprintf(f, "*"); /* callq *%rax, callq *32(%rbp), etc */
         if (ai.arg[i].mreg.is_deref && ai.arg[i].mreg.offset)
-            printf("%d", ai.arg[i].mreg.offset);
-        if (ai.arg[i].mreg.is_deref) printf("(");
-        dump_mreg(ai.arg[i].mreg.mreg, ai.arg[i].mreg.size);
-        if (ai.arg[i].mreg.is_deref) printf(")");
+            fprintf(f, "%d", ai.arg[i].mreg.offset);
+        if (ai.arg[i].mreg.is_deref) fprintf(f, "(");
+        dump_mreg(ai.arg[i].mreg.mreg, ai.arg[i].mreg.size, f);
+        if (ai.arg[i].mreg.is_deref) fprintf(f, ")");
         return;
-    case AP_VREG: printf("%%.%u", ai.arg[i].vreg); return;
-    case AP_ALLOC: printf("%%.alloc.%u", ai.arg[i].offset); return;
+    case AP_VREG: fprintf(f, "%%.%u", ai.arg[i].vreg); return;
+    case AP_ALLOC: fprintf(f, "%%.alloc.%u", ai.arg[i].offset); return;
     }
     fail("unknown arg type");
 }
 
-void dump_x64(AsmFunc *f, Linkage lnk) {
+void dump_x64(AsmFunc *fn, Linkage lnk, FILE *f) {
     uint32_t i, lb = 0;
     AsmInstr ai;
 
     if (!lnk.is_section)
-        printf(".text\n");
+        fprintf(f, ".text\n");
     else if (!lnk.sec_flags)
-        printf(".section %s\n", lnk.sec_name);
+        fprintf(f, ".section %s\n", lnk.sec_name);
     else
-        printf(".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
+        fprintf(f, ".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
 
     if (lnk.is_export) {
-        printf(".globl ");
-        dump_label(f->label[0].ident);
-        printf("\n");
+        fprintf(f, ".globl ");
+        dump_label(fn->label[0].ident, f);
+        fprintf(f, "\n");
     }
     check(!lnk.is_thread, "only DATADEF could have thread linkage");
 
-    for (i = 0; f->instr[i].t; ++i) {
-        while (f->label[lb].offset == i &&
-               !Ident_eq(f->label[lb].ident, empty_ident)) {
-            dump_label(f->label[lb].ident);
-            printf(":\n");
+    for (i = 0; fn->instr[i].t; ++i) {
+        while (fn->label[lb].offset == i &&
+               !Ident_eq(fn->label[lb].ident, empty_ident)) {
+            dump_label(fn->label[lb].ident, f);
+            fprintf(f, ":\n");
             lb++;
         }
-        ai = f->instr[i];
+        ai = fn->instr[i];
         assert(ai.t < countof(op_table) - 1);
-        printf("    %s", op_table[ai.t]);
-        dump_sz(ai.size);
+        fprintf(f, "    %s", op_table[ai.t]);
+        dump_sz(ai.size, f);
         if (ai.arg_t[0] != AP_NONE) {
-            printf(" ");
-            dump_arg(ai, 0);
+            fprintf(f, " ");
+            dump_arg(ai, 0, f);
             if (ai.arg_t[1] != AP_NONE) {
-                printf(", ");
-                dump_arg(ai, 1);
+                fprintf(f, ", ");
+                dump_arg(ai, 1, f);
             }
         }
-        printf("\n");
+        fprintf(f, "\n");
     }
-    printf("\n");
+    fprintf(f, "\n");
 }
 
-void dump_x64_data(DataDef dd) {
+void dump_x64_data(DataDef dd, FILE *f) {
     Linkage lnk = dd.linkage;
     int i, j;
 
     if (!lnk.is_section)
-        printf(".data\n");
+        fprintf(f, ".data\n");
     else if (!lnk.sec_flags)
-        printf(".section %s\n", lnk.sec_name);
+        fprintf(f, ".section %s\n", lnk.sec_name);
     else
-        printf(".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
+        fprintf(f, ".section %s, \"%s\"\n", lnk.sec_name, lnk.sec_flags);
 
     if (lnk.is_export) {
-        printf(".globl ");
-        dump_label(dd.ident);
-        printf("\n");
+        fprintf(f, ".globl ");
+        dump_label(dd.ident, f);
+        fprintf(f, "\n");
     }
     /* TODO: support thread-local */
     check(!lnk.is_thread, "thread-local storage not yet supported");
 
-    printf(".p2align %d\n", dd.log_align >= 4 ? 4 : dd.log_align);
+    fprintf(f, ".p2align %d\n", dd.log_align >= 4 ? 4 : dd.log_align);
 
-    dump_label(dd.ident);
-    printf(":\n");
+    dump_label(dd.ident, f);
+    fprintf(f, ":\n");
 
     for (i = 0; !dd.items[i].is_dummy_item; ++i) {
         Type tp;
         if (!dd.items[i].is_ext_ty) {
-            printf(".zero %d\n", dd.items[i].u.zero_size);
+            fprintf(f, ".zero %d\n", dd.items[i].u.zero_size);
             continue;
         }
 
@@ -249,14 +249,14 @@ void dump_x64_data(DataDef dd) {
                 fail("unreachable");
                 return; /* unreachable */
             case DI_SYM_OFF:
-                printf(".quad ");
-                dump_label(it.u.sym_off.ident);
+                fprintf(f, ".quad ");
+                dump_label(it.u.sym_off.ident, f);
                 if (it.u.sym_off.offset)
-                    printf("%+d", it.u.sym_off.offset);
-                printf("\n");
+                    fprintf(f, "%+d", it.u.sym_off.offset);
+                fprintf(f, "\n");
                 continue; /* unreachable */
             case DI_STR:
-                printf(".string \"%s\"\n", it.u.str);
+                fprintf(f, ".string \"%s\"\n", it.u.str);
                 continue;
             case DI_CONST:
                 break;
@@ -266,24 +266,24 @@ void dump_x64_data(DataDef dd) {
             case V_CI:
                 switch (tp.t) {
                 case TP_B:
-                    printf(".byte %u\n", (uint8_t) it.u.cst.u.u64);
+                    fprintf(f, ".byte %u\n", (uint8_t) it.u.cst.u.u64);
                     break;
                 case TP_H:
-                    printf(".word %u\n", (uint16_t) it.u.cst.u.u64);
+                    fprintf(f, ".word %u\n", (uint16_t) it.u.cst.u.u64);
                     break;
                 case TP_W:
-                    printf(".long %u\n", (uint32_t) it.u.cst.u.u64);
+                    fprintf(f, ".long %u\n", (uint32_t) it.u.cst.u.u64);
                     break;
                 case TP_L:
-                    printf(".quad 0x%llx\n", it.u.cst.u.u64);
+                    fprintf(f, ".quad 0x%llx\n", it.u.cst.u.u64);
                     break;
                 default:
                     fail("unsupported const type for DATADEF");
                     break; /* unreachable */
                 }
                 break;
-            case V_CS: printf(".single %f\n", it.u.cst.u.s); break;
-            case V_CD: printf(".double %lf\n", it.u.cst.u.d); break;
+            case V_CS: fprintf(f, ".single %f\n", it.u.cst.u.s); break;
+            case V_CD: fprintf(f, ".double %lf\n", it.u.cst.u.d); break;
             default:
                 fail("unsupported const type for DATADEF");
                 break; /* unreachable */
@@ -291,7 +291,7 @@ void dump_x64_data(DataDef dd) {
         }
     }
 
-    printf("\n");
+    fprintf(f, "\n");
 }
 
 static AsmFunc asm_func;

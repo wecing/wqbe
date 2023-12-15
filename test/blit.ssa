@@ -1,5 +1,0 @@
-export function $blit(l %a, l %b) {
-@start
-    blit %a, %b, 31
-    ret
-}
