@@ -680,9 +680,17 @@ static void emit_prologue(void) {
             }
         }
 
+        record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
+        if (ctx.fd.params[i].t.t == TP_AG) {
+            /* aggregate: IR values are actually addresses */
+            EMIT2(LEA, Q,
+                  ALLOC(asm_func.alloc_sz + 8),
+                  ALLOC(asm_func.alloc_sz));
+            asm_func.alloc_sz += 8;
+        }
+
         if (!use_stack) {
             /* use regs */
-            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
             for (j = 0; j < 2; ++j) {
                 if (((uint8_t *) &cr)[j] == P_INTEGER) {
                     reg = int_regs[used_int_regs++];
@@ -696,16 +704,8 @@ static void emit_prologue(void) {
                 LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
             }
         } else {
-            uint32_t tp_sz = Type_size(ctx.fd.params[i].t);
             /* use stack */
-            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
-            if (ctx.fd.params[i].t.t == TP_AG) {
-                /* aggregate: IR values are actually addresses */
-                EMIT2(LEA, Q,
-                      ALLOC(asm_func.alloc_sz + 8),
-                      ALLOC(asm_func.alloc_sz));
-                asm_func.alloc_sz += 8;
-            }
+            uint32_t tp_sz = Type_size(ctx.fd.params[i].t);
             /* copy to current frame */
             blit(PREV_STK_ARG(prev_stk_arg_size), ALLOC(asm_func.alloc_sz),
                  tp_sz);
@@ -963,6 +963,11 @@ static void isel_blit(Instr instr) {
     EMIT2(MOV, Q, ARG(src.t, src.a), R10);
     EMIT2(MOV, Q, ARG(dst.t, dst.a), RAX);
     blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), instr.blit_sz);
+}
+
+static void isel_load(Instr instr) {
+    (void) instr;
+    fail("unexpected LOAD instruction"); /* parser shouldn't output this */
 }
 
 #define load_mem_simple(op,mv,xs) \

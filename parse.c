@@ -823,6 +823,17 @@ static uint32_t expect_instr(void) {
             p->u.args[1] = expect_value();
         }
     }
+
+    if (p->t == I_LOAD) {
+        switch (p->ret_t.t) {
+        case TP_L: p->t = I_LOADL; break;
+        case TP_S: p->t = I_LOADS; break;
+        case TP_D: p->t = I_LOADD; break;
+        default:
+            fail("ambigous LOAD instruction: ret_t.t = %d", p->ret_t.t);
+        }
+    }
+
     expect_space_nl();
     return id;
 }
