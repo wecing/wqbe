@@ -826,6 +826,7 @@ static uint32_t expect_instr(void) {
 
     if (p->t == I_LOAD) {
         switch (p->ret_t.t) {
+        case TP_W: p->t = I_LOADSW; break;
         case TP_L: p->t = I_LOADL; break;
         case TP_S: p->t = I_LOADS; break;
         case TP_D: p->t = I_LOADD; break;
