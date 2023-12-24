@@ -39,7 +39,7 @@ static unsigned long hash(const char *s) {
 
 Ident Ident_from_str(const char *s) {
     const int entries_cnt = countof(ident_tbl);
-    Ident ident = {.slot = 0, .idx = 0};
+    Ident ident = {0};
     HashNode *node = 0, **node_p = 0;
 
     if (s) {

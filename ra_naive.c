@@ -16,10 +16,11 @@ static struct {
 } ctx;
 
 static Ident rewrite_label(Ident ident) {
-    char buf[100];
+    char buf[50];
     if (Ident_to_str(ident)[0] != '@')
         return ident; /* only rewrite local labels */
-    sprintf(buf, "@wqbe_ra_%u_%u_%u", ctx.fn_id, ident.slot, ident.idx);
+    snprintf(buf, sizeof(buf), "@wqbe_ra_%u_%u_%u",
+             ctx.fn_id, ident.slot, ident.idx);
     return Ident_from_str(buf);
 }
 
@@ -45,8 +46,8 @@ static AsmInstr rewrite_jmp_label(AsmInstr in) {
 
 static Ident next_fp_ident(void) {
     static int n = 0;
-    char buf[100];
-    sprintf(buf, "$.wqbe.fp.%d", n++);
+    char buf[30];
+    snprintf(buf, sizeof(buf), "$.wqbe.fp.%d", n++);
     return Ident_from_str(buf);
 }
 
@@ -65,7 +66,11 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
+#ifdef __OpenBSD__
+        dd->linkage.sec_name = strdup(".rodata");
+#else
         dd->linkage.sec_name = strdup("__TEXT,__literal8");
+#endif
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;
         *ctx.first_dd_id_ptr = dd_id;
@@ -88,7 +93,11 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
+#ifdef __OpenBSD__
+        dd->linkage.sec_name = strdup(".rodata");
+#else
         dd->linkage.sec_name = strdup("__TEXT,__literal8");
+#endif
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;
         *ctx.first_dd_id_ptr = dd_id;

@@ -9,6 +9,7 @@ OBJ = $(COMMON_OBJ) $(X64_OBJ)
 SRCALL = $(OBJ:.o=.c)
 
 CFLAGS = -std=c89 -g -Wall -Wextra -Wpedantic
+LDFLAGS = -lexecinfo
 
 wqbe: $(OBJ)
 	$(CC) $(LDFLAGS) $(OBJ) -o $@

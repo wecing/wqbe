@@ -133,7 +133,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
 
     assert(num <= 65535 && "too many fix_jnz() calls");
     assert(jnz->t == I_JNZ);
-    sprintf(buf, "%%.wqbe.dephi.fix_jnz.%u", num++);
+    snprintf(buf, sizeof(buf), "%%.wqbe.dephi.fix_jnz.%u", num++);
 
     cp.t = I_COPY;
     cp.next_id = 0;

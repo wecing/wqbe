@@ -597,6 +597,7 @@ static void expect_funcdef_params(FuncDef *fd) {
             check(_peekc() == '%', "%IDENT expected");
             fd->params[i].t.t = TP_NONE;
             fd->params[i].ident = expect_ident();
+            i++;
         } else if (_peekc() == '.') {
             check(_getc() && _peekc() == '.' &&
                   _getc() && _peekc() == '.' &&
@@ -609,10 +610,10 @@ static void expect_funcdef_params(FuncDef *fd) {
             check(Type_is_abity(fd->params[i].t), "ABITY expected");
             check(_peekc() == '%', "%IDENT expected");
             fd->params[i].ident = expect_ident();
+            i++;
         }
         skip_space();
 
-        i++;
         if (i == cap) {
             cap += 2;
             fd->params = realloc(fd->params, sizeof(fd->params[0]) * cap);

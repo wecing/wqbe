@@ -132,7 +132,11 @@ static void dump_mreg(uint8_t mreg, uint8_t size, FILE *f) {
 
 static void dump_label(Ident ident, FILE *f) {
     const char *s = Ident_to_str(ident);
+#ifdef __OpenBSD__
+    fprintf(f, "%s%s", s[0] == '@' ? "." : "", s+1);
+#else
     fprintf(f, "%s%s", s[0] == '@' ? "." : "_", s+1);
+#endif
 }
 
 static void dump_arg(AsmInstr ai, int i, FILE *f) {
@@ -613,7 +617,7 @@ proceed:
         LAST_INSTR.arg[0].mreg.mreg = int_regs[used_int_regs];
         used_int_regs++;
     }
-    sprintf(buf, "@wqbe_reg_save_end_%d", buf_suffix++);
+    snprintf(buf, sizeof(buf), "@wqbe_reg_save_end_%d", buf_suffix++);
     skip_label = Ident_from_str(buf);
     EMIT2(CMP, B, I64(0), MREG(R_RAX, B));
     EMIT1(JE, NONE, SYM(skip_label));
@@ -1328,7 +1332,6 @@ static uint32_t prep_call_args(Instr instr, uint32_t ret_ag) {
         int use_stack = (used_int_regs == countof(int_regs) &&
                          used_sse_regs == countof(sse_regs));
         ClassifyResult cr = {0};
-        uint32_t arg_sz;
         if (i == 0 && instr.u.call.args[i].t.t == TP_NONE) {
             /* QBE passes env using %rax,
                which is incompatible with varargs ABI. */
@@ -1336,7 +1339,6 @@ static uint32_t prep_call_args(Instr instr, uint32_t ret_ag) {
             continue;
         } else {
             cr = classify(instr.u.call.args[i].t);
-            arg_sz = Type_size(instr.u.call.args[i].t);
         }
 
         if (!use_stack) {
@@ -1542,9 +1544,9 @@ static void isel_vaarg(Instr instr) {
     VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
     EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
 
-    sprintf(buf, "@wqbe_vaarg_%u", buf_suffix++);
+    snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
     else_label = Ident_from_str(buf);
-    sprintf(buf, "@wqbe_vaarg_%u", buf_suffix++);
+    snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
     end_label = Ident_from_str(buf);
 
 #define GP_OFFSET         MREG_OFF(R_R10,  0)
