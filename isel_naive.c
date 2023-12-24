@@ -1094,16 +1094,16 @@ cmp_sse(uo, SETP)
 static void isel_truncd(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
-    EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
-    EMIT2(CVTSS2S, D, XMM8, XMM8);
-    EMIT2(MOVS, D, XMM8, ALLOC(dst));
+    EMIT2(MOVS, D, ARG(v.t, v.a), XMM8);
+    EMIT2(CVTSD2S, S, XMM8, XMM8);
+    EMIT2(MOVS, S, XMM8, ALLOC(dst));
 }
 
 static void isel_exts(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
-    EMIT2(MOVS, D, ARG(v.t, v.a), XMM8);
-    EMIT2(CVTSD2S, S, XMM8, XMM8);
+    EMIT2(MOVS, S, ARG(v.t, v.a), XMM8);
+    EMIT2(CVTSS2S, D, XMM8, XMM8);
     EMIT2(MOVS, D, XMM8, ALLOC(dst));
 }
 
