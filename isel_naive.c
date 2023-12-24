@@ -1361,10 +1361,10 @@ static uint32_t prep_call_args(Instr instr, uint32_t ret_ag) {
             EMIT2(MOV, Q, ARG(arg.t, arg.a), R10);
             for (j = 0; j < 2; ++j) {
                 if (((uint8_t *) &cr)[j] == P_INTEGER) {
-                    EMIT2(MOV, Q, MREG_OFF(R_R10, 0), FAKE);
+                    EMIT2(MOV, Q, MREG_OFF(R_R10, j * 8), FAKE);
                     LAST_INSTR.arg[1].mreg.mreg = int_regs[used_int_regs++];
                 } else if (((uint8_t *) &cr)[j] == P_SSE) {
-                    EMIT2(MOVS, D, MREG_OFF(R_R10, 0), FAKE);
+                    EMIT2(MOVS, D, MREG_OFF(R_R10, j * 8), FAKE);
                     LAST_INSTR.arg[1].mreg.size = X64_SZ_D;
                     LAST_INSTR.arg[1].mreg.mreg = sse_regs[used_sse_regs++];
                 }
