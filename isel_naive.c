@@ -834,15 +834,21 @@ arith_wl(and, AND)
 static void isel_div(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult x = visit_value(instr.u.args[0], R_RAX);
+    /* x64 div ops do not take immediates as arguments.
+       divss/divsd are fine since we use mem64 anyways. */
     if (instr.ret_t.t == TP_W) {
         EMIT2(MOV, L, ARG(x.t, x.a), EAX);
-        x = visit_value(instr.u.args[1], R_R10);
-        EMIT1(IDIV, L, ARG(x.t, x.a));
+        EMIT0(CLTD, NONE);
+        x = visit_value(instr.u.args[1], R_R11);
+        EMIT2(MOV, L, ARG(x.t, x.a), R11D);
+        EMIT1(IDIV, L, R11D);
         EMIT2(MOV, L, EAX, ALLOC(dst));
     } else if (instr.ret_t.t == TP_L) {
         EMIT2(MOV, Q, ARG(x.t, x.a), RAX);
-        x = visit_value(instr.u.args[1], R_R10);
-        EMIT1(IDIV, Q, ARG(x.t, x.a));
+        EMIT0(CQTO, NONE);
+        x = visit_value(instr.u.args[1], R_R11);
+        EMIT2(MOV, Q, ARG(x.t, x.a), R11);
+        EMIT1(IDIV, Q, R11);
         EMIT2(MOV, Q, RAX, ALLOC(dst));
     } else if (instr.ret_t.t == TP_S) {
         EMIT2(MOVS, S, ARG(x.t, x.a), XMM8);
@@ -865,13 +871,17 @@ static void isel_div(Instr instr) {
         VisitValueResult x = visit_value(instr.u.args[0], R_RAX); \
         if (instr.ret_t.t == TP_W) { \
             EMIT2(MOV, L, ARG(x.t, x.a), EAX); \
-            x = visit_value(instr.u.args[1], R_R10); \
-            EMIT1(xop, L, ARG(x.t, x.a)); \
+            EMIT0(CLTD, NONE); \
+            x = visit_value(instr.u.args[1], R_R11); \
+            EMIT2(MOV, L, ARG(x.t, x.a), R11D); \
+            EMIT1(xop, L, R11D); \
             EMIT2(MOV, L, MREG(r, L), ALLOC(dst)); \
         } else if (instr.ret_t.t == TP_L) { \
             EMIT2(MOV, Q, ARG(x.t, x.a), RAX); \
-            x = visit_value(instr.u.args[1], R_R10); \
-            EMIT1(xop, Q, ARG(x.t, x.a)); \
+            EMIT0(CQTO, NONE); \
+            x = visit_value(instr.u.args[1], R_R11); \
+            EMIT2(MOV, Q, ARG(x.t, x.a), R11); \
+            EMIT1(xop, Q, R11); \
             EMIT2(MOV, Q, MREG(r, Q), ALLOC(dst)); \
         } else { \
             fail("unexpected return type"); \
