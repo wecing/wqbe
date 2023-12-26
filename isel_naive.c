@@ -1131,22 +1131,27 @@ static void isel_extuw(Instr instr) {
     EMIT2(MOV, Q, R11, ALLOC(dst));
 }
 
-#define ext_hb(op,xop) \
+#define ext_hb(op,xop,sz) \
     static void isel_##op(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
-        /* R10 unused */ \
-        VisitValueResult v = visit_value(instr.u.args[0], R_R10); \
-        EMIT2(MOV, Q, ARG(v.t, v.a), R10); \
-        if (instr.ret_t.t == TP_W) \
-            EMIT2(xop, L, ARG(v.t, v.a), ALLOC(dst)); \
-        else \
-            EMIT2(xop, Q, ARG(v.t, v.a), ALLOC(dst)); \
+        /* R11 unused */ \
+        VisitValueResult v = visit_value(instr.u.args[0], R_R11); \
+        EMIT2(MOV, L, ARG(v.t, v.a), R11D); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(xop, L, FAKE, R11D); \
+            EMIT2(MOV, L, R11D, ALLOC(dst)); \
+        } else { \
+            EMIT2(xop, Q, FAKE, R11); \
+            EMIT2(MOV, Q, R11, ALLOC(dst)); \
+        } \
+        asm_func.instr[ctx.instr_cnt - 2].arg[0].mreg.mreg = R_R11; \
+        asm_func.instr[ctx.instr_cnt - 2].arg[0].mreg.size = X64_SZ_##sz; \
     }
 
-ext_hb(extsh, MOVSW)
-ext_hb(extuh, MOVZW)
-ext_hb(extsb, MOVSB)
-ext_hb(extub, MOVZB)
+ext_hb(extsh, MOVSW, W)
+ext_hb(extuh, MOVZW, W)
+ext_hb(extsb, MOVSB, B)
+ext_hb(extub, MOVZB, B)
 
 static void isel_stosi(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
