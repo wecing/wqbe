@@ -1653,8 +1653,9 @@ static void isel_jnz(Instr instr) {
     /* QBE requires cond to be of i32 type;
        i64 is also allowed but higher 32 bits are discarded. */
     VisitValueResult vvr;
-    vvr = visit_value(instr.u.jump.v, R_R10);
-    EMIT2(CMP, L, I64(0), ARG(vvr.t, vvr.a));
+    vvr = visit_value(instr.u.jump.v, R_R11);
+    EMIT2(MOV, L, ARG(vvr.t, vvr.a), R11D);
+    EMIT2(CMP, L, I64(0), R11D);
     EMIT1(JNE, NONE, SYM(instr.u.jump.dst));
     EMIT1(JMP, NONE, SYM(instr.u.jump.dst_else));
 }
