@@ -37,45 +37,7 @@ static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
         blk->instr_id = instr_id;
 }
 
-/* naive lookup. */
-static Type type_of(FuncDef *fd, Ident ident) {
-    int i;
-    uint16_t blk_id;
-    Block *blk;
-    uint32_t instr_id;
-    Instr *instr;
-    Type unused = {0};
-
-    for (i = 0; fd->params[i].t.t != TP_UNKNOWN; ++i)
-        if (Ident_eq(ident, fd->params[i].ident))
-            return fd->params[i].t;
-
-    blk_id = fd->blk_id;
-    while (blk_id) {
-        blk = Block_get(blk_id);
-        blk_id = blk->next_id;
-
-        instr_id = blk->instr_id;
-        while (instr_id) {
-            instr = Instr_get(instr_id);
-            instr_id = instr->next_id;
-
-            if (instr->ret_t.t != TP_NONE &&
-                instr->ret_t.t != TP_UNKNOWN &&
-                Ident_eq(instr->ident, ident)) {
-                return instr->ret_t;
-            }
-        }
-    }
-
-    fail("ident %s not found in function %s",
-         Ident_to_str(ident), Ident_to_str(fd->ident));
-    return unused; /* unreachable */
-}
-
-/*
- * backup jnz condition so that it would be safe to
- * insert dephi copy ops before it. e.g.
+/* insert dummy blocks so that phi nodes always refer to jmp labels. e.g.
  *
  *     @start
  *     @a
@@ -96,53 +58,99 @@ static Type type_of(FuncDef *fd, Ident ident) {
  *     @exit
  *         ret 0
  *
- * it becomes a dead loop. to fix that, we could backup jnz condition:
+ * it becomes a dead loop. to fix that, we rewrite the program to:
  *
  *     @start
  *     @a
- *         %v =w phi @start 1, @b 0
+ *         %v =w phi @start 1, @dephi.42 0
  *     @b
- *         %_t =w copy %v
- *         jnz %_t, @exit, @a
+ *         jnz %v, @exit, @dephi_42
+ *     @dephi.42
+ *         jmp @a
  *     @exit
  *         ret 0
  *
  * and after removing phi, we would get:
  *
  *     @start
- *         %v =w copy 1
  *     @a
+ *         %v =w copy 1
  *     @b
- *         %_t =w copy %v
+ *         jnz %v, @exit, @dephi.42
+ *     @dephi.42
  *         %v =w copy 0
- *         jnz %_t, @exit, @a
+ *         jmp @a
  *     @exit
  *         ret 0
  */
 static void fix_jnz(FuncDef *fd, Block *blk) {
-    Instr *jnz;
-    Instr cp = {0};
-    Type cond_tp;
+    Instr *jnz = Instr_get(blk->jump_id);
+    Ident *dst_list[2];
     static uint32_t num = 0;
-    char buf[35];
+    int i;
 
-    jnz = Instr_get(blk->jump_id);
-    if (jnz->u.jump.v.t != V_TMP)
-        return; /* no need to fix jnz */
-    cond_tp = type_of(fd, jnz->u.jump.v.u.tmp_ident);
-
-    assert(num <= 65535 && "too many fix_jnz() calls");
     assert(jnz->t == I_JNZ);
-    snprintf(buf, sizeof(buf), "%%.wqbe.dephi.fix_jnz.%u", num++);
 
-    cp.t = I_COPY;
-    cp.next_id = 0;
-    cp.ret_t = cond_tp;
-    cp.ident = Ident_from_str(buf);
-    cp.u.args[0] = jnz->u.jump.v;
-    blk_append(fd, blk->ident, cp);
+    dst_list[0] = &jnz->u.jump.dst;
+    dst_list[1] = &jnz->u.jump.dst_else;
 
-    jnz->u.jump.v.u.tmp_ident = cp.ident;
+    for (i = 0; i < 2; ++i) {
+        uint16_t dst_blk_id = fd->blk_id;
+        Block *dst_blk;
+        uint16_t new_blk_id;
+        Block *new_blk;
+        Instr *new_jmp;
+
+        char buf[20];
+        Ident new_blk_ident;
+        uint32_t instr_id;
+
+        /* find block `*dst_list[i]` */
+        while (dst_blk_id) {
+            dst_blk = Block_get(dst_blk_id);
+            if (Ident_eq(dst_blk->ident, *dst_list[i]))
+                break;
+            dst_blk_id = dst_blk->next_id;
+        }
+        check(dst_blk_id != 0,
+              "block %s not found", Ident_to_str(*dst_list[i]));
+
+        /* only append block if dst block has phi */
+        if (dst_blk->instr_id == 0) continue;
+        if (Instr_get(dst_blk->instr_id)->t != I_PHI) continue;
+
+        num++;
+        assert(num <= 65535 && "too many fix_jnz() calls");
+        snprintf(buf, sizeof(buf), "@dephi.%d", num);
+        new_blk_ident = Ident_from_str(buf);
+
+        /* update dst block phi nodes */
+        instr_id = dst_blk->instr_id;
+        while (instr_id) {
+            int j;
+            Instr *instr = Instr_get(instr_id);
+            instr_id = instr->next_id;
+            if (instr->t != I_PHI) break;
+            for (j = 0; instr->u.phi.args[j].v.t != V_UNKNOWN; ++j) {
+                if (Ident_eq(instr->u.phi.args[j].ident, blk->ident))
+                    instr->u.phi.args[j].ident = new_blk_ident;
+            }
+        }
+
+        /* insert block */
+        new_blk_id = Block_alloc();
+        new_blk = Block_get(new_blk_id);
+        new_blk->ident = new_blk_ident;
+        new_blk->jump_id = Instr_alloc();
+        new_blk->next_id = blk->next_id;
+        blk->next_id = new_blk_id;
+        new_jmp = Instr_get(new_blk->jump_id);
+        new_jmp->t = I_JMP;
+        new_jmp->u.jump.dst = *dst_list[i];
+
+        /* update jnz */
+        *dst_list[i] = new_blk_ident;
+    }
 }
 
 void dephi(FuncDef *fd) {
