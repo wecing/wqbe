@@ -1058,6 +1058,11 @@ store_mem(stored, MOVS, D, R_XMM8)
 /* eq/ne for fp needs special treatment.
    (ucomisd NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
 
+static void isel_clts(Instr);
+static void isel_cltd(Instr);
+static void isel_cles(Instr);
+static void isel_cled(Instr);
+
 #define cmp_sse_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
         uint32_t dst = find_or_alloc_tmp(instr.ident); \
@@ -1072,7 +1077,12 @@ store_mem(stored, MOVS, D, R_XMM8)
             EMIT2(MOV, Q, I64(0), MREG(R_R11,Q)); \
         EMIT2(MOVS, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
         EMIT2(MOVS, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
-        EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
+        if (isel_c##op##s == isel_clts || isel_c##op##s == isel_cles || \
+            isel_c##op##s == isel_cltd || isel_c##op##s == isel_cled) { \
+            EMIT2(UCOMIS, xs, MREG(R_XMM8,xs), MREG(R_XMM9,xs)); \
+        } else { \
+            EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
+        } \
         EMIT1(xop, NONE, ALLOC(dst)); \
         if (A_##xop == A_SETE) { \
             EMIT1(SETNP, NONE, MREG(R_R11,B)); \
@@ -1099,8 +1109,8 @@ cmp_int(ugt, SETA)
 
 cmp_sse(eq, SETE)
 cmp_sse(ne, SETNE)
-cmp_sse(le, SETBE)
-cmp_sse(lt, SETB)
+cmp_sse(le, SETAE) /* swap operands for NaN */
+cmp_sse(lt, SETA) /* swap operands for NaN */
 cmp_sse(ge, SETAE)
 cmp_sse(gt, SETA)
 cmp_sse(o, SETNP)
