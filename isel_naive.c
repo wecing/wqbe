@@ -711,6 +711,11 @@ static void emit_prologue(void) {
             /* use stack */
             uint32_t tp_sz = Type_size(ctx.fd.params[i].t);
             /* copy to current frame */
+            /* not sure if necessary.
+               note that 16-bytes aligned aggregate types probably have to be
+               copied half of the time, because ABI requires the n-th memory
+               argument eightbyte (n starts with 0) should be placed at
+               8n+16(%rbp), which is only 8-bytes aligned. */
             blit(PREV_STK_ARG(prev_stk_arg_size), ALLOC(asm_func.alloc_sz),
                  tp_sz);
             prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
