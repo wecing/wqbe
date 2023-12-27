@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 
 #include "all.h"
 
@@ -62,10 +63,10 @@ static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
  *
  *     @start
  *     @a
- *         %v =w phi @start 1, @dephi.42 0
+ *         %v =w phi @start 1, @dephi.blk.42 0
  *     @b
- *         jnz %v, @exit, @dephi_42
- *     @dephi.42
+ *         jnz %v, @exit, @dephi.blk.42
+ *     @dephi.blk.42
  *         jmp @a
  *     @exit
  *         ret 0
@@ -76,8 +77,8 @@ static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
  *     @a
  *         %v =w copy 1
  *     @b
- *         jnz %v, @exit, @dephi.42
- *     @dephi.42
+ *         jnz %v, @exit, @dephi.blk.42
+ *     @dephi.blk.42
  *         %v =w copy 0
  *         jmp @a
  *     @exit
@@ -101,7 +102,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
         Block *new_blk;
         Instr *new_jmp;
 
-        char buf[20];
+        char buf[30];
         Ident new_blk_ident;
         uint32_t instr_id;
 
@@ -121,7 +122,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
 
         num++;
         assert(num <= 65535 && "too many fix_jnz() calls");
-        snprintf(buf, sizeof(buf), "@dephi.%d", num);
+        snprintf(buf, sizeof(buf), "@dephi.blk.%d", num);
         new_blk_ident = Ident_from_str(buf);
 
         /* update dst block phi nodes */
@@ -158,10 +159,15 @@ void dephi(FuncDef *fd) {
     Block *blk;
     Instr *p;
     Instr cp = {0};
-    int i;
+    Value v = {0};
+    int i, j;
+    static int num = 0;
+    char buf[30];
 
     cp.t = I_COPY;
     cp.next_id = 0;
+
+    v.t = V_TMP;
 
     blk_id = fd->blk_id;
     while (blk_id) {
@@ -173,21 +179,90 @@ void dephi(FuncDef *fd) {
 
     blk_id = fd->blk_id;
     while (blk_id) {
+        uint32_t instr_id;
+        int phi_cnt = 0;
+        Ident *v_idents = 0;
+
         blk = Block_get(blk_id);
         blk_id = blk->next_id;
 
-        while (blk->instr_id) {
-            p = Instr_get(blk->instr_id);
-            if (p->t != I_PHI)
-                break;
+        /* from:
+         *
+         *     @x
+         *         %a =w phi @start 380, @y %r
+         *         %b =w phi @start 747, @y %a
+         *         ...
+         *     @y
+         *         jmp @x
+         *
+         * to:
+         *
+         *     @x
+         *         ...
+         *     @y
+         *         # backup old value
+         *         %dephi.42 =w copy %r
+         *         %dephi.43 =w copy %a
+         *         # overwrite old value
+         *         %a =w copy %dephi.42
+         *         %b =w copy %dephi.43
+         *         jmp @x
+         */
+
+        /* backup old value */
+        instr_id = blk->instr_id;
+        while (instr_id) {
+            p = Instr_get(instr_id);
+            instr_id = p->next_id;
+            if (p->t != I_PHI) break;
+            phi_cnt++;
+        }
+        if (phi_cnt)
+            v_idents = malloc(sizeof(Ident) * phi_cnt);
+        j = 0;
+        instr_id = blk->instr_id;
+        while (instr_id) {
+            p = Instr_get(instr_id);
+            instr_id = p->next_id;
+            if (p->t != I_PHI) break;
+            num++;
+
+            /* just a random safety check */
+            assert(num <= 65535 && "too many dephi() calls");
+
+            snprintf(buf, sizeof(buf), "%%dephi.%d", num);
+            v_idents[j] = Ident_from_str(buf);
+
+            /* add e.g. %dephi.42 =w copy %r */
             for (i = 0; p->u.phi.args[i].v.t != V_UNKNOWN; ++i) {
                 cp.ret_t = p->ret_t;
-                cp.ident = p->ident;
+                cp.ident = v_idents[j];
                 cp.u.args[0] = p->u.phi.args[i].v;
                 blk_append(fd, p->u.phi.args[i].ident, cp);
             }
+
+            j++;
+        }
+
+        /* overwrite old value, remove phi */
+        j = 0;
+        while (blk->instr_id) {
+            p = Instr_get(blk->instr_id);
+            if (p->t != I_PHI) break;
+            /* add e.g. %a =w copy %dephi.42 */
+            for (i = 0; p->u.phi.args[i].v.t != V_UNKNOWN; ++i) {
+                cp.ret_t = p->ret_t;
+                cp.ident = p->ident;
+                v.u.tmp_ident = v_idents[j];
+                cp.u.args[0] = v;
+                blk_append(fd, p->u.phi.args[i].ident, cp);
+            }
+            j++;
             /* discard instr. */
             blk->instr_id = p->next_id;
         }
+
+        if (v_idents)
+            free(v_idents);
     }
 }
