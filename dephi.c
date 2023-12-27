@@ -189,10 +189,12 @@ void dephi(FuncDef *fd) {
         /* from:
          *
          *     @x
-         *         %a =w phi @start 380, @y %r
-         *         %b =w phi @start 747, @y %a
+         *         %a =w phi @s 380, @y %r
+         *         %b =w phi @s 747, @y %a
          *         ...
          *     @y
+         *         jmp @x
+         *     @s
          *         jmp @x
          *
          * to:
@@ -201,11 +203,17 @@ void dephi(FuncDef *fd) {
          *         ...
          *     @y
          *         # backup old value
-         *         %dephi.42 =w copy %r
-         *         %dephi.43 =w copy %a
+         *         %dephi.1 =w copy %r
+         *         %dephi.2 =w copy %a
          *         # overwrite old value
-         *         %a =w copy %dephi.42
-         *         %b =w copy %dephi.43
+         *         %a =w copy %dephi.1
+         *         %b =w copy %dephi.2
+         *         jmp @x
+         *     @s
+         *         %dephi.1 =w copy 380
+         *         %dephi.2 =w copy 747
+         *         %a =w copy %dephi.1
+         *         %b =w copy %dephi.2
          *         jmp @x
          */
 
