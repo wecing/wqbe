@@ -207,7 +207,8 @@ typedef struct AsmInstr {
         AP_ALLOC /* static stack allocation; also used as reg save area */
     };
 
-    uint8_t t;
+    uint8_t t:7;
+    uint8_t arg0_use_fs:1; /* 1st arg xxx becomes %fs:xxx */
     uint8_t size; /* SZ_xxx, except SZ_BUF */
     uint8_t arg_t[2]; /* AP_xxx */
     union AsmInstrArg {
@@ -215,16 +216,27 @@ typedef struct AsmInstr {
         float f32;
         double f64;
         struct MSym {
-            /* when is_got=1, offset is ignored. with ident=xs:
-               is_got=1 => xs@GOTPCREL(%rip)
-                    `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs.
-               is_got=0, offset=12 => xs+12(%rip)
-                    `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
-                    `movq xs+12(%rip), %rax` retrieves data at xs+12.
-               when used in jump ops, only ident is used. (e.g. jmp .BB0) */
+            enum {
+                /* e.g. xs+12(%rip)
+                   `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
+                   `movq xs+12(%rip), %rax` retrieves data at xs+12. */
+                AP_SYM_PLAIN,
+                /* e.g. xs@GOTPCREL(%rip)
+                   ignores offset.
+                   `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs. */
+                AP_SYM_GOTPCREL,
+                /* e.g. x@tpoff+12; or x@tpoff+12(%r11)
+                   - `movq %fs:x@tpoff+12` retrieves thread-local data at x+12;
+                   - `movq %fs:0, %r11`
+                     `leaq x@tpoff+12(%r11), %r11`
+                     retrieves thread-local address of x+12. */
+                AP_SYM_TPOFF
+            };
+            /* when used in jump ops, only ident is used. (e.g. jmp .BB0) */
             Ident ident;
-            int32_t is_got:1;
-            int32_t offset:31;
+            uint32_t t:2;
+            uint32_t mreg:6; /* only for AP_SYM_TPOFF; may be R_END on x64 */
+            int32_t offset:24;
         } sym;
         struct MReg {
             /* when is_deref=0, offset is ignored. with mreg=%rdi:

@@ -319,9 +319,12 @@ static void dump_value(Value v) {
     case V_CI: printf("%llu", v.u.u64); break;
     case V_CS: printf("s_%f", v.u.s); break;
     case V_CD: printf("d_%lf", v.u.d); break;
-    case V_CSYM: case V_CTHS: case V_TMP:
+    case V_CSYM: case V_TMP:
         /* doesn't matter which _ident we use */
         printf("%s", Ident_to_str(v.u.global_ident));
+        break;
+    case V_CTHS:
+        printf("thread %s", Ident_to_str(v.u.thread_ident));
         break;
     default:
         fail("unrecognized Value type: %d", v.t);

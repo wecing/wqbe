@@ -140,9 +140,18 @@ static void dump_label(Ident ident, FILE *f) {
 }
 
 static void dump_arg(AsmInstr ai, int i, FILE *f) {
+    if (i == 0 && ai.arg0_use_fs)
+        fprintf(f, "%%fs:");
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
-    case AP_I64: fprintf(f, "$%lld", ai.arg[i].i64); return;
+    case AP_I64:
+        if (i == 0 && ai.arg0_use_fs) {
+            /* seg:offset doesn't need the $ sigil */
+            fprintf(f, "%lld", ai.arg[i].i64);
+            return;
+        }
+        fprintf(f, "$%lld", ai.arg[i].i64);
+        return;
     case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
     case AP_F64: fprintf(f, "$%lf", ai.arg[i].f64); return;
     case AP_SYM:
@@ -150,11 +159,29 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
         if (ai.t == A_JMP || ai.t == A_JNE ||
             ai.t == A_JE || ai.t == A_JL || ai.t == A_CALL)
             return;
-        if (ai.arg[i].sym.is_got)
-            fprintf(f, "@GOTPCREL");
-        else if (ai.arg[i].sym.offset)
-            fprintf(f, "%+d", ai.arg[i].sym.offset);
-        fprintf(f, "(%%rip)");
+        switch (ai.arg[i].sym.t) {
+        case AP_SYM_PLAIN:
+            if (ai.arg[i].sym.offset)
+                fprintf(f, "%+d", ai.arg[i].sym.offset);
+            fprintf(f, "(%%rip)");
+            break;
+        case AP_SYM_GOTPCREL:
+            fprintf(f, "@GOTPCREL(%%rip)");
+            break;
+        case AP_SYM_TPOFF:
+            fprintf(f, "@tpoff");
+            if (ai.arg[i].sym.offset)
+                fprintf(f, "%+d", ai.arg[i].sym.offset);
+            if (ai.arg[i].sym.mreg != R_END) {
+                fprintf(f, "(");
+                dump_mreg(ai.arg[i].sym.mreg, X64_SZ_Q, f);
+                fprintf(f, ")");
+            }
+            break;
+        default:
+            fail("unrecognized AP_SYM type %d", ai.arg[i].sym.t);
+            break; /* unreachable */
+        }
         return;
     case AP_MREG:
         if (ai.t == A_CALL)
@@ -217,8 +244,18 @@ void dump_x64_data(DataDef dd, FILE *f) {
     Linkage lnk = dd.linkage;
     int i, j;
 
-    if (!lnk.is_section)
+    check(!(lnk.is_section && lnk.is_thread),
+          "section and thread cannot be used together");
+
+#if __APPLE__
+    /* TODO: support thread-local on mac */
+    check(!lnk.is_thread, "thread-local storage not yet supported on macOS");
+#endif
+
+    if (!lnk.is_section && !lnk.is_thread)
         fprintf(f, ".data\n");
+    else if (!lnk.is_section)
+        fprintf(f, ".section .tdata, \"awT\"\n");
     else if (!lnk.sec_flags)
         fprintf(f, ".section %s\n", lnk.sec_name);
     else
@@ -229,8 +266,6 @@ void dump_x64_data(DataDef dd, FILE *f) {
         dump_label(dd.ident, f);
         fprintf(f, "\n");
     }
-    /* TODO: support thread-local */
-    check(!lnk.is_thread, "thread-local storage not yet supported");
 
     fprintf(f, ".p2align %d\n", dd.log_align >= 4 ? 4 : dd.log_align);
 
@@ -253,14 +288,14 @@ void dump_x64_data(DataDef dd, FILE *f) {
                 fail("unreachable");
                 return; /* unreachable */
             case DI_SYM_OFF:
-                fprintf(f, ".quad ");
+                fprintf(f, "    .quad ");
                 dump_label(it.u.sym_off.ident, f);
                 if (it.u.sym_off.offset)
                     fprintf(f, "%+d", it.u.sym_off.offset);
                 fprintf(f, "\n");
                 continue; /* unreachable */
             case DI_STR:
-                fprintf(f, ".string \"%s\"\n", it.u.str);
+                fprintf(f, "    .string \"%s\"\n", it.u.str);
                 continue;
             case DI_CONST:
                 break;
@@ -270,24 +305,24 @@ void dump_x64_data(DataDef dd, FILE *f) {
             case V_CI:
                 switch (tp.t) {
                 case TP_B:
-                    fprintf(f, ".byte %u\n", (uint8_t) it.u.cst.u.u64);
+                    fprintf(f, "    .byte %u\n", (uint8_t) it.u.cst.u.u64);
                     break;
                 case TP_H:
-                    fprintf(f, ".word %u\n", (uint16_t) it.u.cst.u.u64);
+                    fprintf(f, "    .word %u\n", (uint16_t) it.u.cst.u.u64);
                     break;
                 case TP_W:
-                    fprintf(f, ".long %u\n", (uint32_t) it.u.cst.u.u64);
+                    fprintf(f, "    .long %u\n", (uint32_t) it.u.cst.u.u64);
                     break;
                 case TP_L:
-                    fprintf(f, ".quad 0x%llx\n", it.u.cst.u.u64);
+                    fprintf(f, "    .quad 0x%llx\n", it.u.cst.u.u64);
                     break;
                 default:
                     fail("unsupported const type for DATADEF");
                     break; /* unreachable */
                 }
                 break;
-            case V_CS: fprintf(f, ".single %f\n", it.u.cst.u.s); break;
-            case V_CD: fprintf(f, ".double %lf\n", it.u.cst.u.d); break;
+            case V_CS: fprintf(f, "    .single %f\n", it.u.cst.u.s); break;
+            case V_CD: fprintf(f, "    .double %lf\n", it.u.cst.u.d); break;
             default:
                 fail("unsupported const type for DATADEF");
                 break; /* unreachable */
@@ -372,12 +407,13 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define F32(v) AP_F32, .f32=(v)
 #define F64(v) AP_F64, .f64=(v)
 #define ALLOC(n) AP_ALLOC, .offset=(n)
-#define SYM(id) AP_SYM, .sym=msym(id,0,0)
-#define SYM_GOT(id) AP_SYM, .sym=msym(id,1,0)
-#define SYM_OFF(id,off) AP_SYM, .sym=msym(id,0,off)
+#define SYM(id) AP_SYM, .sym=msym(id,AP_SYM_PLAIN,R_END,0)
+#define SYM_OFF(id,off) AP_SYM, .sym=msym(id,AP_SYM_PLAIN,R_END,(off))
+#define SYM_GOT(id) AP_SYM, .sym=msym(id,AP_SYM_GOTPCREL,R_END,0)
+#define SYM_TPOFF(id,r) AP_SYM, .sym=msym(id,AP_SYM_TPOFF,(r),0)
 #define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
 #define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
-#define STK_ARG(off) MREG_OFF(R_RSP, off)
+#define STK_ARG(off) MREG_OFF(R_RSP, (off))
 #define ARG(t,a) (t), =(a)
 
 /* each rN will be expanded to two args */
@@ -416,10 +452,11 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 
 #define LAST_INSTR (asm_func.instr[ctx.instr_cnt - 1])
 
-static struct MSym msym(Ident ident, int is_got, int offset) {
+static struct MSym msym(Ident ident, int t, int mreg, int offset) {
     struct MSym r;
     r.ident = ident;
-    r.is_got = is_got;
+    r.t = t;
+    r.mreg = mreg;
     r.offset = offset;
     return r;
 }
@@ -752,8 +789,17 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
         r.a.f64 = v.u.d;
         return r;
     case V_CSYM:
-    case V_CTHS:
         EMIT2(LEA, Q, SYM(v.u.global_ident), FAKE);
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
+        /* now the symbol address is at %avail_mreg. */
+        r.t = AP_MREG;
+        r.a.mreg = mreg(X64_SZ_Q, avail_mreg, 0, 0);
+        return r;
+    case V_CTHS:
+        EMIT2(MOV, Q, I64(0), FAKE);
+        LAST_INSTR.arg0_use_fs = 1;
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
+        EMIT2(LEA, Q, SYM_TPOFF(v.u.thread_ident, avail_mreg), FAKE);
         LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
         /* now the symbol address is at %avail_mreg. */
         r.t = AP_MREG;
