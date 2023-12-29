@@ -2,6 +2,9 @@
 .SUFFIXES:
 .SUFFIXES: .c .o
 
+PREFIX = /usr/local
+BINDIR = $(PREFIX)/bin
+
 COMMON_OBJ = main.o ir.o parse.o util.o dephi.o
 X64_OBJ = isel_naive.o ra_naive.o
 OBJ = $(COMMON_OBJ) $(X64_OBJ)
@@ -38,5 +41,12 @@ fmt:
 
 check: wqbe
 	qbe/tools/test.sh all
+
+install: wqbe
+	mkdir -p "$(DESTDIR)$(BINDIR)"
+	install -m755 wqbe "$(DESTDIR)$(BINDIR)/wqbe"
+
+uninstall:
+	rm -f "$(DESTDIR)$(BINDIR)/wqbe"
 
 .PHONY: clean fmt check
