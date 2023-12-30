@@ -305,6 +305,7 @@ ParseResult parse(FILE *);
 void check(int cond, const char *, ...); /* like assert(), but always enabled */
 void fail(const char *, ...);
 void dump_stacktrace(void);
+char *w_strdup(const char *);
 
 /* dephi.c */
 void dephi(FuncDef *);

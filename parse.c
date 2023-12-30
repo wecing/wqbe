@@ -84,7 +84,7 @@ static char* expect_str(void) {
         c = _getc();
     }
     buf[i] = '\0';
-    return strdup(buf);
+    return w_strdup(buf);
 }
 
 static void expect_keyword(const char *s) {

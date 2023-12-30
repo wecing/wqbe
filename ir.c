@@ -53,7 +53,7 @@ Ident Ident_from_str(const char *s) {
         }
         if (!node) {
             node = calloc(1, sizeof(*node));
-            node->s = strdup(s);
+            node->s = w_strdup(s);
             node->next = 0;
             *node_p = node;
         }

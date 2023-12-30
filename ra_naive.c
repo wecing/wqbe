@@ -66,10 +66,10 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
-#ifdef __OpenBSD__
-        dd->linkage.sec_name = strdup(".rodata");
+#if defined(__OpenBSD__) || defined(__linux__)
+        dd->linkage.sec_name = w_strdup(".rodata");
 #else
-        dd->linkage.sec_name = strdup("__TEXT,__literal8");
+        dd->linkage.sec_name = w_strdup("__TEXT,__literal8");
 #endif
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;
@@ -93,10 +93,10 @@ static void visit_arg(AsmInstr *in, int idx) {
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
         DataDef *dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
-#ifdef __OpenBSD__
-        dd->linkage.sec_name = strdup(".rodata");
+#if defined(__OpenBSD__) || defined(__linux__)
+        dd->linkage.sec_name = w_strdup(".rodata");
 #else
-        dd->linkage.sec_name = strdup("__TEXT,__literal8");
+        dd->linkage.sec_name = w_strdup("__TEXT,__literal8");
 #endif
         dd->log_align = 3;
         dd->next_id = *ctx.first_dd_id_ptr;

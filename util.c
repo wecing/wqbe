@@ -4,6 +4,14 @@
 
 #include "all.h"
 
+char *w_strdup(const char *s) {
+    size_t sz = strlen(s);
+    char *r = malloc(sz + 1);
+    check(r != 0, "malloc failed");
+    memcpy(r, s, sz+1);
+    return r;
+}
+
 void check(int cond, const char *msg, ...) {
     va_list args;
     if (cond) return;

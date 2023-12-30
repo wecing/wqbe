@@ -1,0 +1,14 @@
+#!/bin/sh
+
+OS=$(uname)
+
+case "$OS" in
+Linux)
+    ;;
+*)
+    LDFLAGS=-lexecinfo
+esac
+
+cat >config.mk <<EOF
+LDFLAGS+=$LDFLAGS
+EOF

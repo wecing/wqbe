@@ -13,7 +13,9 @@ SRCALL = $(OBJ:.o=.c)
 
 CC = cc
 CFLAGS = -std=c89 -g -Wall -Wextra -Wpedantic
-LDFLAGS = -lexecinfo
+LDFLAGS =
+
+-include config.mk
 
 wqbe: $(OBJ)
 	$(CC) $(LDFLAGS) $(OBJ) -o $@

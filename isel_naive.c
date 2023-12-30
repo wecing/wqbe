@@ -132,7 +132,7 @@ static void dump_mreg(uint8_t mreg, uint8_t size, FILE *f) {
 
 static void dump_label(Ident ident, FILE *f) {
     const char *s = Ident_to_str(ident);
-#ifdef __OpenBSD__
+#if defined(__OpenBSD__) || defined(__linux__)
     fprintf(f, "%s%s", s[0] == '@' ? "." : "", s+1);
 #else
     fprintf(f, "%s%s", s[0] == '@' ? "." : "_", s+1);
@@ -145,12 +145,20 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
     switch (ai.arg_t[i]) {
     case AP_NONE: return;
     case AP_I64:
-        if (i == 0 && ai.arg0_use_fs) {
+        if (i != 0 || !ai.arg0_use_fs) {
             /* seg:offset doesn't need the $ sigil */
-            fprintf(f, "%lld", ai.arg[i].i64);
-            return;
+            fprintf(f, "$");
         }
-        fprintf(f, "$%lld", ai.arg[i].i64);
+        /* NOTE: we should probably check if constant value is within acceptable
+           range */
+        if (ai.size == X64_SZ_B)
+            fprintf(f, "%d", (int32_t) (int8_t) ai.arg[i].i64);
+        else if (ai.size == X64_SZ_W)
+            fprintf(f, "%d", (int32_t) (int16_t) ai.arg[i].i64);
+        else if (ai.size == X64_SZ_L)
+            fprintf(f, "%d", (int32_t) ai.arg[i].i64);
+        else
+            fprintf(f, "%lld", ai.arg[i].i64);
         return;
     case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
     case AP_F64: fprintf(f, "$%lf", ai.arg[i].f64); return;
