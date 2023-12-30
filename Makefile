@@ -11,6 +11,7 @@ OBJ = $(COMMON_OBJ) $(X64_OBJ)
 
 SRCALL = $(OBJ:.o=.c)
 
+CC = cc
 CFLAGS = -std=c89 -g -Wall -Wextra -Wpedantic
 LDFLAGS = -lexecinfo
 
