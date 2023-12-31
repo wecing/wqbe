@@ -416,6 +416,7 @@ static Value expect_value(void) {
         break;
     case EOF:
         fail("VALUE expected, got EOF");
+        break; /* unreachable */
     default:
         fail("VALUE expected, got '%c'", _peekc());
     }

@@ -316,9 +316,9 @@ static void dump_type(Type t) {
 
 static void dump_value(Value v) {
     switch (v.t) {
-    case V_CI: printf("%llu", v.u.u64); break;
+    case V_CI: printf("%lu", v.u.u64); break;
     case V_CS: printf("s_%f", v.u.s); break;
-    case V_CD: printf("d_%lf", v.u.d); break;
+    case V_CD: printf("d_%f", v.u.d); break;
     case V_CSYM: case V_TMP:
         /* doesn't matter which _ident we use */
         printf("%s", Ident_to_str(v.u.global_ident));

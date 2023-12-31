@@ -158,10 +158,10 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
         else if (ai.size == X64_SZ_L)
             fprintf(f, "%d", (int32_t) ai.arg[i].i64);
         else
-            fprintf(f, "%lld", ai.arg[i].i64);
+            fprintf(f, "%ld", ai.arg[i].i64);
         return;
     case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
-    case AP_F64: fprintf(f, "$%lf", ai.arg[i].f64); return;
+    case AP_F64: fprintf(f, "$%f", ai.arg[i].f64); return;
     case AP_SYM:
         dump_label(ai.arg[i].sym.ident, f);
         if (ai.t == A_JMP || ai.t == A_JNE ||
@@ -322,7 +322,7 @@ void dump_x64_data(DataDef dd, FILE *f) {
                     fprintf(f, "    .long %u\n", (uint32_t) it.u.cst.u.u64);
                     break;
                 case TP_L:
-                    fprintf(f, "    .quad 0x%llx\n", it.u.cst.u.u64);
+                    fprintf(f, "    .quad 0x%lx\n", it.u.cst.u.u64);
                     break;
                 default:
                     fail("unsupported const type for DATADEF");
@@ -330,7 +330,7 @@ void dump_x64_data(DataDef dd, FILE *f) {
                 }
                 break;
             case V_CS: fprintf(f, "    .single %f\n", it.u.cst.u.s); break;
-            case V_CD: fprintf(f, "    .double %lf\n", it.u.cst.u.d); break;
+            case V_CD: fprintf(f, "    .double %f\n", it.u.cst.u.d); break;
             default:
                 fail("unsupported const type for DATADEF");
                 break; /* unreachable */
