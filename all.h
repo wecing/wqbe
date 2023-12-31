@@ -245,7 +245,7 @@ typedef struct AsmInstr {
                is_deref=1, offset=12 => 12(%rdi) */
             uint8_t size; /* SZ_xxx, except SZ_BUF */
             uint8_t mreg;
-            int32_t is_deref:1;
+            uint32_t is_deref:1;
             int32_t offset:31;
         } mreg;
         uint32_t vreg;
@@ -306,6 +306,7 @@ void check(int cond, const char *, ...); /* like assert(), but always enabled */
 void fail(const char *, ...);
 void dump_stacktrace(void);
 char *w_strdup(const char *);
+int w_snprintf(char *, size_t, const char *, ...);
 
 /* dephi.c */
 void dephi(FuncDef *);

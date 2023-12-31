@@ -662,7 +662,7 @@ proceed:
         LAST_INSTR.arg[0].mreg.mreg = int_regs[used_int_regs];
         used_int_regs++;
     }
-    snprintf(buf, sizeof(buf), "@wqbe_reg_save_end_%d", buf_suffix++);
+    w_snprintf(buf, sizeof(buf), "@wqbe_reg_save_end_%d", buf_suffix++);
     skip_label = Ident_from_str(buf);
     EMIT2(CMP, B, I64(0), MREG(R_RAX, B));
     EMIT1(JE, NONE, SYM(skip_label));
@@ -1641,9 +1641,9 @@ static void isel_vaarg(Instr instr) {
     VisitValueResult vvr = visit_value(instr.u.args[0], R_R10);
     EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
 
-    snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
+    w_snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
     else_label = Ident_from_str(buf);
-    snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
+    w_snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
     end_label = Ident_from_str(buf);
 
 #define GP_OFFSET         MREG_OFF(R_R10,  0)

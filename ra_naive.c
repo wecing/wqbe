@@ -19,8 +19,8 @@ static Ident rewrite_label(Ident ident) {
     char buf[50];
     if (Ident_to_str(ident)[0] != '@')
         return ident; /* only rewrite local labels */
-    snprintf(buf, sizeof(buf), "@wqbe_ra_%u_%u_%u",
-             ctx.fn_id, ident.slot, ident.idx);
+    w_snprintf(buf, sizeof(buf), "@wqbe_ra_%u_%u_%u",
+               ctx.fn_id, ident.slot, ident.idx);
     return Ident_from_str(buf);
 }
 
@@ -47,7 +47,7 @@ static AsmInstr rewrite_jmp_label(AsmInstr in) {
 static Ident next_fp_ident(void) {
     static int n = 0;
     char buf[30];
-    snprintf(buf, sizeof(buf), "$.wqbe.fp.%d", n++);
+    w_snprintf(buf, sizeof(buf), "$.wqbe.fp.%d", n++);
     return Ident_from_str(buf);
 }
 

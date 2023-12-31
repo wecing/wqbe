@@ -122,7 +122,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
 
         num++;
         assert(num <= 65535 && "too many fix_jnz() calls");
-        snprintf(buf, sizeof(buf), "@dephi.blk.%d", num);
+        w_snprintf(buf, sizeof(buf), "@dephi.blk.%d", num);
         new_blk_ident = Ident_from_str(buf);
 
         /* update dst block phi nodes */
@@ -238,7 +238,7 @@ void dephi(FuncDef *fd) {
             /* just a random safety check */
             assert(num <= 65535 && "too many dephi() calls");
 
-            snprintf(buf, sizeof(buf), "%%dephi.%d", num);
+            w_snprintf(buf, sizeof(buf), "%%dephi.%d", num);
             v_idents[j] = Ident_from_str(buf);
 
             /* add e.g. %dephi.42 =w copy %r */
