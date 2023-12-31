@@ -158,7 +158,11 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
         else if (ai.size == X64_SZ_L)
             fprintf(f, "%d", (int32_t) ai.arg[i].i64);
         else
+#if defined(__linux__)
             fprintf(f, "%ld", ai.arg[i].i64);
+#else
+            fprintf(f, "%lld", ai.arg[i].i64);
+#endif
         return;
     case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
     case AP_F64: fprintf(f, "$%f", ai.arg[i].f64); return;
@@ -322,7 +326,11 @@ void dump_x64_data(DataDef dd, FILE *f) {
                     fprintf(f, "    .long %u\n", (uint32_t) it.u.cst.u.u64);
                     break;
                 case TP_L:
+#if defined(__linux__)
                     fprintf(f, "    .quad 0x%lx\n", it.u.cst.u.u64);
+#else
+                    fprintf(f, "    .quad 0x%llx\n", it.u.cst.u.u64);
+#endif
                     break;
                 default:
                     fail("unsupported const type for DATADEF");
