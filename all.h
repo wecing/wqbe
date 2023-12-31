@@ -34,29 +34,31 @@ typedef struct Value {
     } u;
 } Value;
 
+/* Type.t */
+enum {
+    TP_UNKNOWN,
+    /* BASETY := 'w' | 'l' | 's' | 'd' */
+    TP_W,
+    TP_L,
+    TP_S,
+    TP_D,
+    /* EXTTY := BASETY | 'b' | 'h' */
+    TP_B,
+    TP_H,
+    /* SUBTY := EXTTY | :IDENT */
+    TP_AG,
+    /* SUBWTY := 'sb' | 'ub' | 'sh' | 'uh' */
+    /* ABITY := BASETY | SUBWTY | :IDENT */
+    TP_SB,
+    TP_UB,
+    TP_SH,
+    TP_UH,
+    /* where type is optional, e.g. func return type is [ABITY];
+       or for 'env' params/args, which have no type */
+    TP_NONE
+};
+
 typedef struct Type {
-    enum {
-        TP_UNKNOWN,
-        /* BASETY := 'w' | 'l' | 's' | 'd' */
-        TP_W,
-        TP_L,
-        TP_S,
-        TP_D,
-        /* EXTTY := BASETY | 'b' | 'h' */
-        TP_B,
-        TP_H,
-        /* SUBTY := EXTTY | :IDENT */
-        TP_AG,
-        /* SUBWTY := 'sb' | 'ub' | 'sh' | 'uh' */
-        /* ABITY := BASETY | SUBWTY | :IDENT */
-        TP_SB,
-        TP_UB,
-        TP_SH,
-        TP_UH,
-        /* where type is optional, e.g. func return type is [ABITY];
-           or for 'env' params/args, which have no type */
-        TP_NONE
-    };
     uint32_t t:4;
     uint32_t ag_id:28;
 } Type;
@@ -127,14 +129,16 @@ typedef struct DataDef {
     DataDefItem *items; /* ends with is_dummy_item */
 } DataDef;
 
-typedef struct Instr {
-    enum {
-        I_UNKNOWN,
+/* Instr.t */
+enum {
+    I_UNKNOWN,
 #define I(up,low) I_##up,
 #include "instr.inc"
 #undef I
-        I_END
-    };
+    I_END
+};
+
+typedef struct Instr {
     uint32_t t:8;
     uint32_t next_id:24;
     Type ret_t;
@@ -191,24 +195,43 @@ typedef struct FuncDef {
 
 typedef union AsmInstrArg AsmInstrArg;
 
-typedef struct AsmInstr {
-    enum { SZ_NONE, SZ_B, SZ_H, SZ_W, SZ_L, SZ_S, SZ_D };
-    enum {
-        AP_NONE,
-        AP_I64, AP_F32, AP_F64, AP_SYM, AP_MREG,
-        /* these are removed in reg alloc */
-        AP_VREG,
-        /* AP_STK_ARG,
-           stack-passed params on current frame;
-           on x64 this is just n(%rsp) */
-        /* AP_PREV_STK_ARG,
-           stack-passed params on caller's frame;
-           on x64 this is just 16+n(%rbp) */
-        AP_ALLOC /* static stack allocation; also used as reg save area */
-    };
+/* AsmInstr.size */
+enum { SZ_NONE, SZ_B, SZ_H, SZ_W, SZ_L, SZ_S, SZ_D };
+/* AsmInstr.arg_t */
+enum {
+    AP_NONE,
+    AP_I64, AP_F32, AP_F64, AP_SYM, AP_MREG,
+    /* these are removed in reg alloc */
+    AP_VREG,
+    /* AP_STK_ARG,
+       stack-passed params on current frame;
+       on x64 this is just n(%rsp) */
+    /* AP_PREV_STK_ARG,
+       stack-passed params on caller's frame;
+       on x64 this is just 16+n(%rbp) */
+    AP_ALLOC /* static stack allocation; also used as reg save area */
+};
+/* AsmInstr.arg.sym.t */
+enum {
+    /* e.g. xs+12(%rip)
+       `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
+       `movq xs+12(%rip), %rax` retrieves data at xs+12. */
+    AP_SYM_PLAIN,
+    /* e.g. xs@GOTPCREL(%rip)
+       ignores offset.
+       `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs. */
+    AP_SYM_GOTPCREL,
+    /* e.g. x@tpoff+12; or x@tpoff+12(%r11)
+       - `movq %fs:x@tpoff+12` retrieves thread-local data at x+12;
+       - `movq %fs:0, %r11`
+         `leaq x@tpoff+12(%r11), %r11`
+         retrieves thread-local address of x+12. */
+    AP_SYM_TPOFF
+};
 
-    uint8_t t:7;
-    uint8_t arg0_use_fs:1; /* 1st arg xxx becomes %fs:xxx */
+typedef struct AsmInstr {
+    uint8_t t;
+    uint8_t arg0_use_fs; /* 1st arg xxx becomes %fs:xxx */
     uint8_t size; /* SZ_xxx, except SZ_BUF */
     uint8_t arg_t[2]; /* AP_xxx */
     union AsmInstrArg {
@@ -216,22 +239,6 @@ typedef struct AsmInstr {
         float f32;
         double f64;
         struct MSym {
-            enum {
-                /* e.g. xs+12(%rip)
-                   `leaq xs+12(%rip), %rax` retrieves addr of xs+12;
-                   `movq xs+12(%rip), %rax` retrieves data at xs+12. */
-                AP_SYM_PLAIN,
-                /* e.g. xs@GOTPCREL(%rip)
-                   ignores offset.
-                   `movq xs@GOTPCREL(%rip), %rax` retrieves addr of xs. */
-                AP_SYM_GOTPCREL,
-                /* e.g. x@tpoff+12; or x@tpoff+12(%r11)
-                   - `movq %fs:x@tpoff+12` retrieves thread-local data at x+12;
-                   - `movq %fs:0, %r11`
-                     `leaq x@tpoff+12(%r11), %r11`
-                     retrieves thread-local address of x+12. */
-                AP_SYM_TPOFF
-            };
             /* when used in jump ops, only ident is used. (e.g. jmp .BB0) */
             Ident ident;
             uint32_t t:2;

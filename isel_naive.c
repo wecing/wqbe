@@ -485,13 +485,14 @@ static void emit_label(Ident ident) {
     assert(ctx.label_cnt < countof(asm_func.label));
 }
 
+/* ClassifyResult.(fst|snd) */
+enum {
+    P_NO_CLASS, /* ignored for passing */
+    P_MEMORY,
+    P_SSE,
+    P_INTEGER
+};
 typedef struct ClassifyResult {
-    enum {
-        P_NO_CLASS, /* ignored for passing */
-        P_MEMORY,
-        P_SSE,
-        P_INTEGER
-    };
     uint8_t fst; /* first eight bytes */
     uint8_t snd; /* second */
 } ClassifyResult;
