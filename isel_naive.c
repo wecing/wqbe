@@ -360,7 +360,7 @@ static struct {
     struct {
         Ident ident;
         uint32_t offset; /* byte offset for AP_ALLOC */
-    } tmp[1024]; /* 8KB */
+    } tmp[10 * 1024]; /* 10 * 8KB */
     uint32_t tmp_cnt;
 
     uint8_t is_first_blk;
@@ -1211,7 +1211,8 @@ static void isel_exts(Instr instr) {
 static void isel_extsw(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
-    EMIT2(MOVSL, Q, ARG(v.t, v.a), R11);
+    EMIT2(MOV, L, ARG(v.t, v.a), R11D);
+    EMIT2(MOVSL, Q, R11D, R11);
     EMIT2(MOV, Q, R11, ALLOC(dst));
 }
 
