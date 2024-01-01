@@ -56,11 +56,45 @@ static void visit_arg(AsmInstr *in, int idx) {
     AsmInstrArg arg = {0};
 
     switch (in->arg_t[idx]) {
-    case AP_NONE: case AP_I64: case AP_SYM: case AP_MREG:
+    case AP_NONE: case AP_SYM: case AP_MREG:
         return;
     case AP_VREG:
         fail("unexpected AP_VREG; not supported by naive reg alloc");
         return; /* unreachable */
+    case AP_I64: {
+        /* convert imm64 to .quad data if needed.
+           note that we still need to e.g. truncate to i8 for addb; this is done
+           in dump_arg(). */
+        uint16_t dd_id;
+        DataDef *dd;
+        if (-0x80000000L <= in->arg[idx].i64 &&
+            in->arg[idx].i64 <= 0x7FFFFFFFL)
+            return;
+        dd_id = DataDef_alloc(next_fp_ident());
+        dd = DataDef_get(dd_id);
+        dd->linkage.is_section = 1;
+#if defined(__OpenBSD__) || defined(__linux__)
+        dd->linkage.sec_name = w_strdup(".rodata");
+#else
+        dd->linkage.sec_name = w_strdup("__TEXT,__literal8");
+#endif
+        dd->log_align = 3;
+        dd->next_id = *ctx.first_dd_id_ptr;
+        *ctx.first_dd_id_ptr = dd_id;
+        dd->items = calloc(2, sizeof(dd->items[0]));
+        dd->items[0].is_ext_ty = 1;
+        dd->items[0].u.ext_ty.t.t = TP_L;
+        dd->items[0].u.ext_ty.items =
+            calloc(2, sizeof(dd->items[0].u.ext_ty.items[0]));
+        dd->items[0].u.ext_ty.items[0].t = DI_CONST;
+        dd->items[0].u.ext_ty.items[0].u.cst.t = V_CI;
+        dd->items[0].u.ext_ty.items[0].u.cst.u.u64 = in->arg[idx].i64;
+        dd->items[1].is_dummy_item = 1;
+        arg.sym.ident = dd->ident;
+        in->arg[idx] = arg;
+        in->arg_t[idx] = AP_SYM;
+        return;
+    }
     case AP_F32: {
         uint32_t v = *(uint32_t *) &in->arg[idx].f32;
         uint16_t dd_id = DataDef_alloc(next_fp_ident());
