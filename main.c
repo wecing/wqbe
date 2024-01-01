@@ -92,15 +92,20 @@ int main(int argc, char *argv[]) {
             dump_debug_info = 1;
         } else if (strcmp(argv[i], "-o") == 0) {
             check(i + 1 < argc, "wqbe: no output file specified for -o");
+            i++;
             check(fout_path == 0,
                   "wqbe: multiple output file specified: %s and %s",
-                  fout_path, argv[i+1]);
-            if (strcmp(argv[i+1], "-") != 0) {
-                fout = fopen(argv[i+1], "w");
-                check(fout != 0, "wqbe: failed to open %s", argv[i+1]);
-                fout_path = argv[i+1];
+                  fout_path, argv[i]);
+            if (strcmp(argv[i], "-") != 0) {
+                fout = fopen(argv[i], "w");
+                check(fout != 0, "wqbe: failed to open %s", argv[i]);
+                fout_path = argv[i];
             }
+        } else if (strcmp(argv[i], "-t") == 0) {
+            check(i + 1 < argc, "wqbe: no output file specified for -o");
             i++;
+            check(strcmp(argv[i], "amd64_sysv") == 0,
+                  "unsupported target %s", argv[i]);
         } else {
             check(f_path == 0, "wqbe: multiple input specified: %s and %s",
                   f_path, argv[i]);
@@ -112,13 +117,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (f_path == 0) {
-        fprintf(stderr,
-                "wqbe: no input specified "
-                "(use '-' for stdin input)\n\n");
-        dump_usage();
-        return 1;
-    }
+    /* this is QBE's behavior. */
+    if (f_path == 0)
+        f = stdin;
 
     ir = parse(f);
     if (f != stdin) fclose(f);
