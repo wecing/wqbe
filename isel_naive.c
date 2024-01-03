@@ -287,7 +287,8 @@ void dump_x64_data(DataDef dd, FILE *f) {
     for (i = 0; !dd.items[i].is_dummy_item; ++i) {
         Type tp;
         if (!dd.items[i].is_ext_ty) {
-            fprintf(f, ".zero %d\n", dd.items[i].u.zero_size);
+            /* some assemblers warns on seeing `.zero 0` */
+            fprintf(f, ".fill %d,1,0\n", dd.items[i].u.zero_size);
             continue;
         }
 
@@ -323,9 +324,11 @@ void dump_x64_data(DataDef dd, FILE *f) {
                     fprintf(f, "    .word %u\n", (uint16_t) it.u.cst.u.u64);
                     break;
                 case TP_W:
+                case TP_S:
                     fprintf(f, "    .long %u\n", (uint32_t) it.u.cst.u.u64);
                     break;
                 case TP_L:
+                case TP_D: /* e.g. `d 4653144502051863213` is allowed */
 #if defined(__linux__)
                     fprintf(f, "    .quad 0x%lx\n", it.u.cst.u.u64);
 #else
@@ -333,14 +336,15 @@ void dump_x64_data(DataDef dd, FILE *f) {
 #endif
                     break;
                 default:
-                    fail("unsupported const type for DATADEF");
+                    fail("unsupported const type for DATADEF: tp.t = %d", tp.t);
                     break; /* unreachable */
                 }
                 break;
             case V_CS: fprintf(f, "    .single %f\n", it.u.cst.u.s); break;
             case V_CD: fprintf(f, "    .double %f\n", it.u.cst.u.d); break;
             default:
-                fail("unsupported const type for DATADEF");
+                fail("unsupported const type for DATADEF: Value.t = %d",
+                     it.u.cst.t);
                 break; /* unreachable */
             }
         }
@@ -1801,6 +1805,11 @@ static void isel_ret(Instr instr) {
     EMIT2(MOV, Q, RBP, RSP);
     EMIT1(POP, Q, RBP);
     EMIT0(RET, NONE);
+}
+
+static void isel_dbgloc(Instr instr) {
+    /* note: dbgloc requires dbgfile. */
+    (void)instr;
 }
 
 static void isel(Instr instr) {

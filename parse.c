@@ -957,20 +957,29 @@ ParseResult parse(FILE *_input) {
     uint16_t cur_dd = 0, dd = 0;
     uint16_t cur_fd = 0, fd = 0;
     Linkage linkage;
+    int c1, c2;
     input = _input;
 
 TAIL_CALL:
     skip_space_nl();
-    switch (_peekc()) {
+    switch (c1 = _peekc()) {
     case EOF: break;
-    case 't':
+    case 't': /* 'type' | 'thread' */
+    case 'd': /* 'data' | 'dbgfile' */
         _getc();
-        if (_peekc() == 'y') { /* 'type' */
-            _ungetc('t');
+        c2 = _peekc();
+        _ungetc(c1);
+        if (c1 == 't' && c2 == 'y') { /* 'type' */
             expect_typedef();
             goto TAIL_CALL;
+        } else if (c1 == 'd' && c2 == 'b') { /* 'dbgfile' */
+            /* note: we cannot support dbgfile since we currently loads the
+               whole IL file without preserving original DATADEF/FUNCDEF
+               orderings. */
+            expect_keyword("dbgfile");
+            free(expect_str());
+            goto TAIL_CALL;
         }
-        _ungetc('t'); /* could also be 'thread' */
         /* fallthrough */
     default:
         linkage = expect_linkage();
