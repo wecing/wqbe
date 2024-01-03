@@ -1737,8 +1737,7 @@ static void isel_phi(Instr instr) {
 
 static void isel_hlt(Instr instr) {
     (void)instr;
-    EMIT2(MOV, Q, I64(0), R10);
-    EMIT2(MOV, Q, I64(0), MREG_OFF(R_R10, 0)); /* segfault */
+    EMIT0(UD2, NONE);
 }
 
 static void isel_jmp(Instr instr) {
