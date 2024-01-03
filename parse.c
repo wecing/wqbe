@@ -322,6 +322,7 @@ TAIL_CALL:
         goto TAIL_CALL;
     case 's':
         expect_keyword("section");
+        r.is_section = 1;
         if (r.sec_name) free(r.sec_name);
         if (r.sec_flags) free(r.sec_flags);
         r.sec_name = 0;
