@@ -308,7 +308,7 @@ void dump_x64_data(DataDef dd, FILE *f) {
                 fprintf(f, "\n");
                 continue; /* unreachable */
             case DI_STR:
-                fprintf(f, "    .string \"%s\"\n", it.u.str);
+                fprintf(f, "    .ascii \"%s\"\n", it.u.str);
                 continue;
             case DI_CONST:
                 break;
