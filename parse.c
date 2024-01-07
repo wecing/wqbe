@@ -73,7 +73,7 @@ static uint64_t expect_number(void) {
 /* string literal, '"' ... '"' */
 static char* expect_str(void) {
     int c, i = 0;
-    char buf[1024];
+    char buf[4 * 1024];
     c = _getc();
     check(c == '"', "string literal expected, got '%c'", c);
     c = _getc();

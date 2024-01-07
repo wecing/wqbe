@@ -261,11 +261,11 @@ typedef struct AsmInstr {
 } AsmInstr;
 
 typedef struct AsmFunc {
-    AsmInstr instr[20 * 1024]; /* 20 * 24KB; ends with .t == 0 (A_UNKNOWN) */
+    AsmInstr instr[128 * 1024]; /* 128 * 24KB; ends with .t == 0 (A_UNKNOWN) */
     struct {
         Ident ident;
         uint32_t offset; /* index into instr, inclusive */
-    } label[10 * 128]; /* 10 * 1KB; ends with empty ident; sorted by offset */
+    } label[128 * 128]; /* 128 * 1KB; ends with empty ident; sorted by offset */
     uint32_t stk_arg_sz;
     uint32_t alloc_sz;
     uint8_t has_dyn_alloc;

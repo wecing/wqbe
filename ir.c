@@ -15,13 +15,13 @@ static HashNode *ident_tbl[1024]; /* 16 KB; hash table */
 static AgType ag_type_pool[1024]; /* 16 KB */
 static int next_ag_id = 1;
 
-static DataDef data_def_pool[1024]; /* 40 KB */
+static DataDef data_def_pool[4 * 1024]; /* 4 * 40 KB */
 static int next_data_def_id = 1;
 
-static Instr instr_pool[16 * 1024]; /* 16 * 48 KB */
+static Instr instr_pool[64 * 1024]; /* 64 * 48 KB */
 static int next_instr_id = 1;
 
-static Block blk_pool[2 * 1024]; /* 2 * 16 KB */
+static Block blk_pool[16 * 1024]; /* 16 * 16 KB */
 static int next_blk_id = 1;
 
 static FuncDef func_def_pool[1024]; /* 48 KB */

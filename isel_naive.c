@@ -364,7 +364,7 @@ static struct {
     struct {
         Ident ident;
         uint32_t offset; /* byte offset for AP_ALLOC */
-    } tmp[10 * 1024]; /* 10 * 8KB */
+    } tmp[16 * 1024]; /* 16 * 8KB */
     uint32_t tmp_cnt;
 
     uint8_t is_first_blk;
@@ -956,14 +956,20 @@ static void isel_div(Instr instr) {
         VisitValueResult x = visit_value(instr.u.args[0], R_RAX); \
         if (instr.ret_t.t == TP_W) { \
             EMIT2(MOV, L, ARG(x.t, x.a), EAX); \
-            EMIT0(CLTD, NONE); \
+            if (A_##xop == A_IDIV) \
+                EMIT0(CLTD, NONE); \
+            else \
+                EMIT2(MOV, Q, I64(0), RDX); \
             x = visit_value(instr.u.args[1], R_R11); \
             EMIT2(MOV, L, ARG(x.t, x.a), R11D); \
             EMIT1(xop, L, R11D); \
             EMIT2(MOV, L, MREG(r, L), ALLOC(dst)); \
         } else if (instr.ret_t.t == TP_L) { \
             EMIT2(MOV, Q, ARG(x.t, x.a), RAX); \
-            EMIT0(CQTO, NONE); \
+            if (A_##xop == A_IDIV) \
+                EMIT0(CQTO, NONE); \
+            else \
+                EMIT2(MOV, Q, I64(0), RDX); \
             x = visit_value(instr.u.args[1], R_R11); \
             EMIT2(MOV, Q, ARG(x.t, x.a), R11); \
             EMIT1(xop, Q, R11); \
