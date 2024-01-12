@@ -76,8 +76,9 @@ static void visit_arg(AsmInstr *in, int idx) {
         DataDef *dd;
         int64_t i64 = in->arg[idx].i64;
         if (-0x80000000L <= i64 && i64 <= 0x7FFFFFFFL)
-            /* cvtsi2sd doesn't accept immediates, so always use .quad data */
-            if (in->t != A_CVTSI2SD)
+            /* cvtsi2s{s,d} do not accept immediates,
+               so always use .quad data */
+            if (in->t != A_CVTSI2SS && in->t != A_CVTSI2SD)
                 return;
         dd_id = DataDef_alloc(next_quad_ident());
         dd = DataDef_get(dd_id);
