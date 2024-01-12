@@ -1319,9 +1319,9 @@ static void isel_swtof(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
     if (instr.ret_t.t == TP_S)
-        EMIT2(CVTSI2S, S, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTSI2SS, L, ARG(v.t, v.a), XMM8);
     else
-        EMIT2(CVTSI2S, D, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTSI2SD, L, ARG(v.t, v.a), XMM8);
     EMIT2(MOVS, D, XMM8, ALLOC(dst));
 }
 
@@ -1330,10 +1330,10 @@ static void isel_uwtof(Instr instr) {
     VisitValueResult v = visit_value(instr.u.args[0], R_R10); /* R10 unused */
     if (instr.ret_t.t == TP_S) {
         EMIT2(MOV, L, ARG(v.t, v.a), R11D);
-        EMIT2(CVTSI2S, S, R11, XMM8);
+        EMIT2(CVTSI2SS, Q, R11, XMM8);
     } else {
         EMIT2(MOV, L, ARG(v.t, v.a), R11D);
-        EMIT2(CVTSI2S, D, R11, XMM8);
+        EMIT2(CVTSI2SD, Q, R11, XMM8);
     }
     EMIT2(MOVS, D, XMM8, ALLOC(dst));
 }
@@ -1342,9 +1342,9 @@ static void isel_sltof(Instr instr) {
     uint32_t dst = find_or_alloc_tmp(instr.ident);
     VisitValueResult v = visit_value(instr.u.args[0], R_R10);
     if (instr.ret_t.t == TP_S)
-        EMIT2(CVTSI2S, S, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTSI2SS, Q, ARG(v.t, v.a), XMM8);
     else
-        EMIT2(CVTSI2S, D, ARG(v.t, v.a), XMM8);
+        EMIT2(CVTSI2SD, Q, ARG(v.t, v.a), XMM8);
     EMIT2(MOVS, D, XMM8, ALLOC(dst));
 }
 
@@ -1360,13 +1360,13 @@ static void isel_ultof(Instr instr) {
     EMIT2(SHR, Q, MREG(R_RCX, B), RSI);
     EMIT2(OR, Q, RSI, RAX);
     if (instr.ret_t.t == TP_S) {
-        EMIT2(CVTSI2S, S, RAX, XMM8);
+        EMIT2(CVTSI2SS, Q, RAX, XMM8);
         EMIT2(MOV, Q, XMM8, RAX);
         EMIT2(MOV, L, EDX, ECX);
         EMIT2(SHL, L, I64(23), ECX);
         EMIT2(ADD, L, ECX, EAX);
     } else {
-        EMIT2(CVTSI2S, D, RAX, XMM8);
+        EMIT2(CVTSI2SD, Q, RAX, XMM8);
         EMIT2(MOV, Q, XMM8, RAX);
         EMIT2(MOV, Q, RDX, RCX);
         EMIT2(SHL, Q, I64(52), RCX);

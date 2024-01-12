@@ -51,6 +51,13 @@ static Ident next_fp_ident(void) {
     return Ident_from_str(buf);
 }
 
+static Ident next_quad_ident(void) {
+    static int n = 0;
+    char buf[30];
+    w_snprintf(buf, sizeof(buf), "$.wqbe.quad.%d", n++);
+    return Ident_from_str(buf);
+}
+
 static void visit_arg(AsmInstr *in, int idx) {
     /* ensure the whole union is zero-ed */
     AsmInstrArg arg = {0};
@@ -67,10 +74,12 @@ static void visit_arg(AsmInstr *in, int idx) {
            in dump_arg(). */
         uint16_t dd_id;
         DataDef *dd;
-        if (-0x80000000L <= in->arg[idx].i64 &&
-            in->arg[idx].i64 <= 0x7FFFFFFFL)
-            return;
-        dd_id = DataDef_alloc(next_fp_ident());
+        int64_t i64 = in->arg[idx].i64;
+        if (-0x80000000L <= i64 && i64 <= 0x7FFFFFFFL)
+            /* cvtsi2sd doesn't accept immediates, so always use .quad data */
+            if (in->t != A_CVTSI2SD)
+                return;
+        dd_id = DataDef_alloc(next_quad_ident());
         dd = DataDef_get(dd_id);
         dd->linkage.is_section = 1;
 #if defined(__OpenBSD__) || defined(__linux__)
@@ -88,7 +97,7 @@ static void visit_arg(AsmInstr *in, int idx) {
             calloc(2, sizeof(dd->items[0].u.ext_ty.items[0]));
         dd->items[0].u.ext_ty.items[0].t = DI_CONST;
         dd->items[0].u.ext_ty.items[0].u.cst.t = V_CI;
-        dd->items[0].u.ext_ty.items[0].u.cst.u.u64 = in->arg[idx].i64;
+        dd->items[0].u.ext_ty.items[0].u.cst.u.u64 = i64;
         dd->items[1].is_dummy_item = 1;
         arg.sym.ident = dd->ident;
         in->arg[idx] = arg;
