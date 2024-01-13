@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <string.h>
 
 #include "all.h"
@@ -158,11 +159,7 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
         else if (ai.size == X64_SZ_L)
             fprintf(f, "%d", (int32_t) ai.arg[i].i64);
         else
-#if defined(__linux__)
-            fprintf(f, "%ld", ai.arg[i].i64);
-#else
-            fprintf(f, "%lld", ai.arg[i].i64);
-#endif
+            fprintf(f, "%" PRId64, ai.arg[i].i64);
         return;
     case AP_F32: fprintf(f, "$%f", ai.arg[i].f32); return;
     case AP_F64: fprintf(f, "$%f", ai.arg[i].f64); return;
@@ -329,11 +326,7 @@ void dump_x64_data(DataDef dd, FILE *f) {
                     break;
                 case TP_L:
                 case TP_D: /* e.g. `d 4653144502051863213` is allowed */
-#if defined(__linux__)
-                    fprintf(f, "    .quad 0x%lx\n", it.u.cst.u.u64);
-#else
-                    fprintf(f, "    .quad 0x%llx\n", it.u.cst.u.u64);
-#endif
+                    fprintf(f, "    .quad 0x%" PRIx64 "\n", it.u.cst.u.u64);
                     break;
                 default:
                     fail("unsupported const type for DATADEF: tp.t = %d", tp.t);

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -316,11 +317,7 @@ static void dump_type(Type t) {
 
 static void dump_value(Value v) {
     switch (v.t) {
-#if defined(__linux__)
-    case V_CI: printf("%lu", v.u.u64); break;
-#else
-    case V_CI: printf("%llu", v.u.u64); break;
-#endif
+    case V_CI: printf("%" PRIu64, v.u.u64); break;
     case V_CS: printf("s_%f", v.u.s); break;
     case V_CD: printf("d_%f", v.u.d); break;
     case V_CSYM: case V_TMP:
