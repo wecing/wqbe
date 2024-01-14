@@ -6,6 +6,7 @@
 static int dump_debug_info = 0;
 static ParseResult ir;
 static FILE *fout;
+static uint16_t last_dbgfile_id = 0;
 
 static void dump_all(const char *prompt) {
     if (!dump_debug_info) return;
@@ -49,6 +50,11 @@ static void x64(FuncDef *fd) {
         printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
         printf("####################\n\n");
     }
+    if (last_dbgfile_id != fd->dbgfile_id) {
+        last_dbgfile_id = fd->dbgfile_id;
+        fprintf(fout, ".file %u \"%s\"\n",
+                last_dbgfile_id, ir_get_dbgfile(last_dbgfile_id));
+    }
     dump_x64(af, fd->linkage, fout);
 }
 
@@ -59,6 +65,10 @@ static void run_all_dd(uint16_t id, void (*f)(DataDef, FILE *)) {
         f(dd, fout);
         id = dd.next_id;
     }
+}
+
+static void emit_dbgfile(uint16_t id, const char *s) {
+    fprintf(fout, ".file %u \"%s\"\n", id, s);
 }
 
 static void dump_usage(void) {
@@ -127,6 +137,11 @@ int main(int argc, char *argv[]) {
 
     run_all_fd(ir.first_funcdef_id, dephi);
     dump_all("after dephi()");
+
+    /* emit .file assembler directives.
+       note: current impl is a hack that only works for FUNCDEF. */
+    ir_foreach_dbgfile(emit_dbgfile);
+    fprintf(fout, ".file \"\"\n\n"); /* reset .file */
 
     run_all_fd(ir.first_funcdef_id, x64);
     run_all_dd(ir.first_datadef_id, dump_x64_data);

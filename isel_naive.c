@@ -15,6 +15,37 @@ static const char *op_table[] = {
     0 /* A_END */
 };
 
+static AsmFunc asm_func;
+
+static struct {
+    FuncDef fd;
+    uint32_t instr_cnt; /* AsmFunc.instr */
+    uint32_t label_cnt; /* AsmFunc.label */
+    int32_t ret_ptr_alloc_offset;
+
+    struct {
+        Ident ident;
+        uint32_t offset; /* byte offset for AP_ALLOC */
+    } tmp[16 * 1024]; /* 16 * 8KB */
+    uint32_t tmp_cnt;
+
+    uint8_t is_first_blk;
+
+    /* on x64, va_list is defined as:
+
+       typedef struct {
+           unsigned int gp_offset;
+           unsigned int fp_offset;
+           void *overflow_arg_area;
+           void *reg_save_area;
+       } va_list[1]; */
+
+    uint32_t gp_offset;
+    uint32_t fp_offset;
+    uint32_t overflow_arg_area; /* PREV_STK_ARG offset */
+    uint32_t reg_save_area; /* ALLOC offset */
+} ctx;
+
 static void dump_sz(uint8_t sz, FILE *f) {
     switch (sz) {
     case X64_SZ_NONE: return;
@@ -234,14 +265,23 @@ void dump_x64(AsmFunc *fn, Linkage lnk, FILE *f) {
         }
         ai = fn->instr[i];
         assert(ai.t < countof(op_table) - 1);
-        fprintf(f, "    %s", op_table[ai.t]);
-        dump_sz(ai.size, f);
-        if (ai.arg_t[0] != AP_NONE) {
-            fprintf(f, " ");
-            dump_arg(ai, 0, f);
-            if (ai.arg_t[1] != AP_NONE) {
-                fprintf(f, ", ");
-                dump_arg(ai, 1, f);
+        if (ai.t == A__AS_LOC) {
+            if (ai.arg[1].i64 == -1)
+                fprintf(f, "    .loc %d %" PRId64,
+                        ctx.fd.dbgfile_id, ai.arg[0].i64);
+            else
+                fprintf(f, "    .loc %d %" PRId64 " %" PRId64,
+                        ctx.fd.dbgfile_id, ai.arg[0].i64, ai.arg[1].i64);
+        } else {
+            fprintf(f, "    %s", op_table[ai.t]);
+            dump_sz(ai.size, f);
+            if (ai.arg_t[0] != AP_NONE) {
+                fprintf(f, " ");
+                dump_arg(ai, 0, f);
+                if (ai.arg_t[1] != AP_NONE) {
+                    fprintf(f, ", ");
+                    dump_arg(ai, 1, f);
+                }
             }
         }
         fprintf(f, "\n");
@@ -345,37 +385,6 @@ void dump_x64_data(DataDef dd, FILE *f) {
 
     fprintf(f, "\n");
 }
-
-static AsmFunc asm_func;
-
-static struct {
-    FuncDef fd;
-    uint32_t instr_cnt; /* AsmFunc.instr */
-    uint32_t label_cnt; /* AsmFunc.label */
-    int32_t ret_ptr_alloc_offset;
-
-    struct {
-        Ident ident;
-        uint32_t offset; /* byte offset for AP_ALLOC */
-    } tmp[16 * 1024]; /* 16 * 8KB */
-    uint32_t tmp_cnt;
-
-    uint8_t is_first_blk;
-
-    /* on x64, va_list is defined as:
-
-       typedef struct {
-           unsigned int gp_offset;
-           unsigned int fp_offset;
-           void *overflow_arg_area;
-           void *reg_save_area;
-       } va_list[1]; */
-
-    uint32_t gp_offset;
-    uint32_t fp_offset;
-    uint32_t overflow_arg_area; /* PREV_STK_ARG offset */
-    uint32_t reg_save_area; /* ALLOC offset */
-} ctx;
 
 static void record_tmp(Ident ident, uint32_t offset) {
     assert(ctx.tmp_cnt < countof(ctx.tmp));
@@ -1806,8 +1815,9 @@ static void isel_ret(Instr instr) {
 }
 
 static void isel_dbgloc(Instr instr) {
-    /* note: dbgloc requires dbgfile. */
-    (void)instr;
+    EMIT2(_AS_LOC, NONE,
+          I64(instr.u.args[0].u.u64),
+          I64(instr.u.args[1].t == V_CI ? instr.u.args[1].u.u64 : -1));
 }
 
 static void isel(Instr instr) {

@@ -187,6 +187,7 @@ typedef struct FuncDef {
         Ident ident;
     } *params; /* ends with TP_UNKNOWN */
     uint8_t is_varargs;
+    uint16_t dbgfile_id; /* 0: not provided */
     uint16_t blk_id;
     uint16_t next_id;
 } FuncDef;
@@ -296,6 +297,9 @@ uint32_t Instr_alloc(void);
 Instr *Instr_get(uint32_t);
 void Instr_dump(Instr);
 void ir_fix_typedef_size_align(void);
+uint16_t ir_add_dbgfile(const char *);
+const char *ir_get_dbgfile(uint16_t);
+void ir_foreach_dbgfile(void (*)(uint16_t, const char *));
 void ir_dump_typedef(void);
 void ir_dump_datadef(uint16_t);
 void ir_dump_funcdef(uint16_t);

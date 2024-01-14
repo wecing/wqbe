@@ -959,6 +959,8 @@ ParseResult parse(FILE *_input) {
     uint16_t cur_fd = 0, fd = 0;
     Linkage linkage;
     int c1, c2;
+    uint16_t last_dbgfile_id = 0; /* none */
+
     input = _input;
 
 TAIL_CALL:
@@ -974,11 +976,11 @@ TAIL_CALL:
             expect_typedef();
             goto TAIL_CALL;
         } else if (c1 == 'd' && c2 == 'b') { /* 'dbgfile' */
-            /* note: we cannot support dbgfile since we currently loads the
-               whole IL file without preserving original DATADEF/FUNCDEF
-               orderings. */
+            char *s;
             expect_keyword("dbgfile");
-            free(expect_str());
+            s = expect_str();
+            last_dbgfile_id = ir_add_dbgfile(s);
+            free(s);
             goto TAIL_CALL;
         }
         /* fallthrough */
@@ -997,6 +999,7 @@ TAIL_CALL:
             goto TAIL_CALL;
         case 'f': /* 'function' */
             fd = expect_funcdef(linkage);
+            FuncDef_get(fd)->dbgfile_id = last_dbgfile_id;
             if (cur_fd) {
                 FuncDef_get(cur_fd)->next_id = fd;
             } else {

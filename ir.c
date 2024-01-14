@@ -28,6 +28,9 @@ static int next_blk_id = 1;
 static FuncDef func_def_pool[1024]; /* 48 KB */
 static int next_func_def_id = 1;
 
+static Ident dbgfiles[1024]; /* 4 KB */
+static int dbgfiles_cnt = 0;
+
 /* djb2 hashing */
 static unsigned long hash(const char *s) {
     char c;
@@ -454,6 +457,28 @@ static void dump_sb(ArrType *sb) {
         sb++;
     }
     printf("}");
+}
+
+uint16_t ir_add_dbgfile(const char *s) {
+    Ident id = Ident_from_str(s);
+    int i;
+    for (i = 0; i < dbgfiles_cnt; ++i)
+        if (Ident_eq(id, dbgfiles[i]))
+            return i+1;
+    assert((unsigned) dbgfiles_cnt < countof(dbgfiles));
+    dbgfiles[dbgfiles_cnt++] = id;
+    return dbgfiles_cnt;
+}
+
+const char *ir_get_dbgfile(uint16_t id) {
+    assert(id != 0);
+    return Ident_to_str(dbgfiles[id-1]);
+}
+
+void ir_foreach_dbgfile(void (*f)(uint16_t, const char *)) {
+    int i;
+    for (i = 0; i < dbgfiles_cnt; ++i)
+        f(i+1, Ident_to_str(dbgfiles[i]));
 }
 
 void ir_dump_typedef(void) {

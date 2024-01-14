@@ -54,3 +54,4 @@ A(SUBS,subs)
 A(UCOMIS,ucomis)
 A(UD2,ud2)
 A(XOR,xor)
+A(_AS_LOC,_as_loc) /* assembler .loc directive; lower case not used */
