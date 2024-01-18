@@ -6,7 +6,7 @@
 static int dump_debug_info = 0;
 static ParseResult ir;
 static FILE *fout;
-static uint16_t last_dbgfile_id = 0;
+static int use_naive = 0;
 
 static void dump_all(const char *prompt) {
     if (!dump_debug_info) return;
@@ -33,29 +33,36 @@ static void run_all_fd(uint16_t id, void (*f)(FuncDef *)) {
 
 static void x64(FuncDef *fd) {
     AsmFunc *af;
-    af = isel_naive_x64(fd);
 
-    if (dump_debug_info) {
-        printf("####################\n");
-        printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
-        printf("####################\n\n");
-        dump_x64(af, fd->linkage, stdout);
-        printf("\n");
-    }
+    if (use_naive) {
+        af = isel_naive_x64(fd);
+        if (dump_debug_info) {
+            printf("####################\n");
+            printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
+            printf("####################\n\n");
+            dump_x64(af, fd->linkage, stdout);
+            printf("\n");
+        }
 
-    af = ra_naive_x64(af, &ir.first_datadef_id);
+        af = ra_naive_x64(af, &ir.first_datadef_id);
+        if (dump_debug_info) {
+            printf("####################\n");
+            printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
+            printf("####################\n\n");
+        }
+        dump_x64(af, fd->linkage, fout);
+    } else {
+        af = isel_x64(fd);
+        if (dump_debug_info) {
+            printf("####################\n");
+            printf("### %s after isel_x64()\n", Ident_to_str(fd->ident));
+            printf("####################\n\n");
+            dump_x64(af, fd->linkage, stdout);
+            printf("\n");
+        }
 
-    if (dump_debug_info) {
-        printf("####################\n");
-        printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
-        printf("####################\n\n");
+        // TODO: rest of the pipeline
     }
-    if (last_dbgfile_id != fd->dbgfile_id) {
-        last_dbgfile_id = fd->dbgfile_id;
-        fprintf(fout, ".file %u \"%s\"\n",
-                last_dbgfile_id, ir_get_dbgfile(last_dbgfile_id));
-    }
-    dump_x64(af, fd->linkage, fout);
 }
 
 static void run_all_dd(uint16_t id, void (*f)(DataDef, FILE *)) {
@@ -76,6 +83,7 @@ static void dump_usage(void) {
     printf("    -d          dump debug info\n");
     printf("    -h          prints this messsage\n");
     printf("    -o file     output to file\n");
+    printf("    --naive     use simpler naive codegen\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -116,7 +124,11 @@ int main(int argc, char *argv[]) {
             i++;
             check(strcmp(argv[i], "amd64_sysv") == 0,
                   "unsupported target %s", argv[i]);
+        } else if (strcmp(argv[i], "--naive") == 0) {
+            use_naive = 1;
         } else {
+            check(argv[i][0] != '-' || argv[i][1] == '\0',
+                  "unrecognized parameter %s", argv[i]);
             check(f_path == 0, "wqbe: multiple input specified: %s and %s",
                   f_path, argv[i]);
             f = stdin;

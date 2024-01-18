@@ -233,7 +233,7 @@ enum {
 typedef struct AsmInstr {
     uint8_t t;
     uint8_t arg0_use_fs; /* 1st arg xxx becomes %fs:xxx */
-    uint8_t size; /* SZ_xxx, except SZ_BUF */
+    uint8_t size; /* SZ_xxx */
     uint8_t arg_t[2]; /* AP_xxx */
     union AsmInstrArg {
         int64_t i64;
@@ -251,12 +251,15 @@ typedef struct AsmInstr {
                is_deref=0 => %rdi
                is_deref=1 => (%rdi)
                is_deref=1, offset=12 => 12(%rdi) */
-            uint8_t size; /* SZ_xxx, except SZ_BUF */
+            uint8_t size; /* SZ_xxx */
             uint8_t mreg;
             uint32_t is_deref:1;
             int32_t offset:31;
         } mreg;
-        uint32_t vreg;
+        struct {
+            uint8_t size; /* SZ_xxx */
+            uint32_t id; /* > 0 */
+        } vreg;
         int offset; /* byte offset */
     } arg[2];
 } AsmInstr;
@@ -329,3 +332,6 @@ AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
 
 /* ra_naive.c */
 AsmFunc *ra_naive_x64(AsmFunc *, uint16_t *);
+
+/* isel.c */
+AsmFunc *isel_x64(FuncDef *); /* returns borrowed memory */

@@ -232,7 +232,7 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
         dump_mreg(ai.arg[i].mreg.mreg, ai.arg[i].mreg.size, f);
         if (ai.arg[i].mreg.is_deref) fprintf(f, ")");
         return;
-    case AP_VREG: fprintf(f, "%%.%u", ai.arg[i].vreg); return;
+    case AP_VREG: fprintf(f, "%%.%u", ai.arg[i].vreg.id); return;
     case AP_ALLOC: fprintf(f, "%%.alloc.%u", ai.arg[i].offset); return;
     }
     fail("unknown arg type");
