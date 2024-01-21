@@ -14,8 +14,9 @@ static struct {
 
     struct {
         Ident ident;
-        uint32_t offset; /* byte offset for AP_ALLOC */
+        uint32_t id; /* > 0, vreg */
     } tmp[16 * 1024]; /* 16 * 8KB */
+    uint8_t tmp_sz[16 * 1024]; /* 16 * 1KB; SZ_xxx */
     uint32_t tmp_cnt;
 
     uint8_t is_first_blk;
@@ -35,22 +36,24 @@ static struct {
     uint32_t reg_save_area; /* ALLOC offset */
 } ctx;
 
-static void record_tmp(Ident ident, uint32_t offset) {
+typedef struct VReg VReg;
+
+static VReg find_or_alloc_tmp(Ident ident, uint8_t sz) {
+    uint32_t i;
+    VReg vreg;
+    vreg.size = sz;
+    for (i = 0; i < ctx.tmp_cnt; ++i)
+        if (Ident_eq(ident, ctx.tmp[i].ident)) {
+            vreg.id = ctx.tmp[i].id;
+            return vreg;
+        }
     assert(ctx.tmp_cnt < countof(ctx.tmp));
     ctx.tmp[ctx.tmp_cnt].ident = ident;
-    ctx.tmp[ctx.tmp_cnt].offset = offset;
+    ctx.tmp[ctx.tmp_cnt].id = ctx.tmp_cnt+1;
+    ctx.tmp_sz[ctx.tmp_cnt] = sz;
+    vreg.id = ctx.tmp_cnt+1;
     ctx.tmp_cnt++;
-}
-
-static uint32_t find_or_alloc_tmp(Ident ident) {
-    uint32_t i, offset;
-    for (i = 0; i < ctx.tmp_cnt; ++i)
-        if (Ident_eq(ident, ctx.tmp[i].ident))
-            return ctx.tmp[i].offset;
-    offset = asm_func.alloc_sz;
-    asm_func.alloc_sz += 8;
-    record_tmp(ident, offset);
-    return offset;
+    return vreg;
 }
 
 #define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz,r,0,0)
@@ -85,6 +88,7 @@ static uint32_t find_or_alloc_tmp(Ident ident) {
 #define MREG_OFF(r,off) AP_MREG, .mreg=mreg(X64_SZ_Q,(r),1,(off))
 #define PREV_STK_ARG(off) MREG_OFF(R_RBP, 16+(off))
 #define STK_ARG(off) MREG_OFF(R_RSP, (off))
+#define VREG(r) AP_VREG, .vreg=(r)
 #define ARG(t,a) (t), =(a)
 
 /* each rN will be expanded to two args */
@@ -368,14 +372,14 @@ static void emit_prologue(void) {
     }
 
     for (i = 0; ctx.fd.params[i].t.t != TP_UNKNOWN; ++i) {
-        uint32_t tp_sz, tp_align, tmp_addr;
+        uint32_t tp_sz, tp_align;
         uint8_t use_stack;
+        VReg vreg;
 
         if (i == 0 && ctx.fd.params[i].t.t == TP_NONE) {
             /* env params are passed via %rax */
-            record_tmp(ctx.fd.params[i].ident, asm_func.alloc_sz);
-            EMIT2(MOV, Q, RAX, ALLOC(asm_func.alloc_sz));
-            asm_func.alloc_sz += 8;
+            vreg = find_or_alloc_tmp(ctx.fd.params[i].ident, X64_SZ_Q);
+            EMIT2(MOV, Q, RAX, VREG(vreg));
             continue;
         }
 
@@ -399,50 +403,91 @@ static void emit_prologue(void) {
             }
         }
 
-        tmp_addr = asm_func.alloc_sz;
-        record_tmp(ctx.fd.params[i].ident, tmp_addr);
         /* aggregate: IR values are actually addresses */
-        if (ctx.fd.params[i].t.t == TP_AG)
-            asm_func.alloc_sz += 8;
+        vreg = find_or_alloc_tmp(
+            ctx.fd.params[i].ident,
+            ctx.fd.params[i].t.t == TP_AG ? X64_SZ_Q : ctx.fd.params[i].t.t);
 
         if (!use_stack) { /* use regs */
             if (tp_align >= 16 && (asm_func.alloc_sz & (tp_align-1)))
                 asm_func.alloc_sz =
                     (asm_func.alloc_sz + tp_align - 1) & ~(tp_align-1);
-            if (ctx.fd.params[i].t.t == TP_AG)
-                EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), ALLOC(tmp_addr));
-
-            for (j = 0; j < 2; ++j) {
-                if (((uint8_t *) &cr)[j] == P_INTEGER) {
+            if (ctx.fd.params[i].t.t == TP_AG) {
+                EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), VREG(vreg));
+                for (j = 0; j < 2; ++j) {
+                    if (((uint8_t *) &cr)[j] == P_INTEGER) {
+                        reg = int_regs[used_int_regs++];
+                        EMIT2(MOV, Q, FAKE, ALLOC(asm_func.alloc_sz));
+                    } else if (((uint8_t *) &cr)[j] == P_SSE) {
+                        reg = sse_regs[used_sse_regs++];
+                        EMIT2(MOVS, D, FAKE, ALLOC(asm_func.alloc_sz));
+                    } else continue;
+                    asm_func.alloc_sz += 8;
+                    LAST_INSTR.arg[0].mreg.mreg = reg;
+                    LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
+                }
+            } else {
+                switch (ctx.fd.params[i].t.t) {
+                case TP_W:
+                    EMIT2(MOV, L, FAKE, VREG(vreg));
+                    break;
+                case TP_L:
+                    EMIT2(MOV, Q, FAKE, VREG(vreg));
+                    break;
+                case TP_SB:
+                case TP_UB:
+                    EMIT2(MOV, B, FAKE, VREG(vreg));
+                    break;
+                case TP_SH:
+                case TP_UH:
+                    EMIT2(MOV, W, FAKE, VREG(vreg));
+                    break;
+                case TP_S:
+                    EMIT2(MOVS, S, FAKE, VREG(vreg));
+                    break;
+                case TP_D:
+                    EMIT2(MOVS, D, FAKE, VREG(vreg));
+                    break;
+                default:
+                    fail("unexpected FUNCDEF param type");
+                }
+                check(cr.fst == P_INTEGER || cr.fst == P_SSE,
+                      "unexpected classify() result");
+                if (cr.fst == P_INTEGER)
                     reg = int_regs[used_int_regs++];
-                    EMIT2(MOV, Q, FAKE, ALLOC(asm_func.alloc_sz));
-                } else if (((uint8_t *) &cr)[j] == P_SSE) {
+                else
                     reg = sse_regs[used_sse_regs++];
-                    EMIT2(MOVS, D, FAKE, ALLOC(asm_func.alloc_sz));
-                } else continue;
-                asm_func.alloc_sz += 8;
                 LAST_INSTR.arg[0].mreg.mreg = reg;
                 LAST_INSTR.arg[0].mreg.size = LAST_INSTR.size;
             }
         } else { /* use stack */
-            /* copy to current frame to satisfy alignment needs */
-            /* since prev_stk_arg_size is always 8-bytes aligned,
-               this is only occasionally needed for >=16 bytes alignments. */
             if (prev_stk_arg_size & (tp_align-1)) {
+                /* copy to current frame to satisfy alignment needs */
+                /* since prev_stk_arg_size is always 8-bytes aligned, this is
+                   only occasionally needed for >=16 bytes alignments. */
+
                 /* only aggregate types could trigger this */
                 assert(ctx.fd.params[i].t.t == TP_AG);
 
                 asm_func.alloc_sz =
                     (asm_func.alloc_sz + tp_align - 1) & ~(tp_align-1);
-                EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), ALLOC(tmp_addr));
+                EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), VREG(vreg));
 
                 blit(PREV_STK_ARG(prev_stk_arg_size), ALLOC(asm_func.alloc_sz),
                      tp_sz);
 
                 prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
                 asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
+            } else if (ctx.fd.params[i].t.t == TP_AG) {
+                EMIT2(LEA, Q, PREV_STK_ARG(prev_stk_arg_size), VREG(vreg));
+                prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
             } else {
-                EMIT2(LEA, Q, PREV_STK_ARG(prev_stk_arg_size), ALLOC(tmp_addr));
+                check(cr.fst == P_INTEGER || cr.fst == P_SSE,
+                      "unexpected classify() result");
+                if (cr.fst == P_INTEGER)
+                    EMIT2(MOV, Q, PREV_STK_ARG(prev_stk_arg_size), VREG(vreg));
+                else
+                    EMIT2(MOVS, D, PREV_STK_ARG(prev_stk_arg_size), VREG(vreg));
                 prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
             }
         }
@@ -451,12 +496,60 @@ static void emit_prologue(void) {
     emit_reg_save(used_int_regs, used_sse_regs, prev_stk_arg_size);
 }
 
+#define isel_alloc16 isel_alloc
+#define isel_alloc4  isel_alloc
+#define isel_alloc8  isel_alloc
+
+static void isel_alloc(Instr instr) {
+    (void)instr;
+    fail("not implemented");
+}
+
+static void isel_cnel(Instr instr) {
+    (void)instr;
+    fail("not implemented");
+}
+
+static void isel(Instr instr) {
+    switch (instr.t) {
+    case I_ALLOC8: isel_alloc8(instr); return;
+    case I_CNEL: isel_cnel(instr); return;
+    }
+    fail("unrecognized instr type %d", instr.t);
+}
+
 AsmFunc *isel_x64(FuncDef *fd) {
-    memset(&ctx, 0, sizeof(ctx));
+    uint16_t blk_id;
+    uint32_t instr_id;
+    Block blk;
+    Instr instr;
+
     memset(&asm_func, 0, sizeof(asm_func));
+    memset(&ctx, 0, sizeof(ctx));
     ctx.fd = *fd;
 
     emit_prologue();
 
+    blk_id = ctx.fd.blk_id;
+    ctx.is_first_blk = 1;
+    while (blk_id) {
+        blk = *Block_get(blk_id);
+        blk_id = blk.next_id;
+
+        emit_label(blk.ident);
+
+        instr_id = blk.instr_id;
+        while (instr_id) {
+            instr = *Instr_get(instr_id);
+            instr_id = instr.next_id;
+            isel(instr);
+        }
+        isel(*Instr_get(blk.jump_id));
+        ctx.is_first_blk = 0;
+    }
+
+    /* ensure space for end marker (0) of instr and label */
+    assert(ctx.instr_cnt < countof(asm_func.instr));
+    assert(ctx.label_cnt < countof(asm_func.label));
     return &asm_func;
 }

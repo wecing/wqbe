@@ -256,7 +256,7 @@ typedef struct AsmInstr {
             uint32_t is_deref:1;
             int32_t offset:31;
         } mreg;
-        struct {
+        struct VReg {
             uint8_t size; /* SZ_xxx */
             uint32_t id; /* > 0 */
         } vreg;
