@@ -677,8 +677,74 @@ cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
 
 static void isel_ret(Instr instr) {
-    (void)instr;
-    // TODO: implement ret
+    if (instr.u.jump.v.t != V_UNKNOWN) {
+        VisitValueResult vvr = visit_value(instr.u.jump.v, R_R10, X64_SZ_Q);
+        if (ctx.fd.ret_t.t == TP_AG) {
+            ClassifyResult cr = classify(ctx.fd.ret_t);
+            if (cr.fst == P_MEMORY) {
+                uint32_t tp_sz = Type_size(ctx.fd.ret_t);
+                /* RAX: required by ABI */
+                EMIT2(MOV, Q, ALLOC(ctx.ret_ptr_alloc_offset), RAX);
+                EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+                blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), tp_sz);
+            } else {
+                int i;
+                int used_int_regs = 0, used_sse_regs = 0;
+                uint8_t *crp = (void*) &cr;
+                EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+                for (i = 0; i < 2; ++i) {
+                    if (crp[i] == P_SSE) {
+                        EMIT2(MOVS, D, MREG_OFF(R_R10, i * 8), FAKE);
+                        LAST_INSTR.arg[1].mreg.mreg =
+                            used_sse_regs == 0 ? R_XMM0 : R_XMM1;
+                        LAST_INSTR.arg[1].mreg.size = LAST_INSTR.size;
+                        used_sse_regs++;
+                    } else if (crp[i] == P_INTEGER) {
+                        EMIT2(MOV, Q, MREG_OFF(R_R10, i * 8), FAKE);
+                        LAST_INSTR.arg[1].mreg.mreg =
+                            used_int_regs == 0 ? R_RAX : R_RDX;
+                        used_int_regs++;
+                    }
+                }
+            }
+        } else {
+            switch (ctx.fd.ret_t.t) {
+#define SRC ARG(vvr.t, vvr.a)
+            case TP_W:
+                vvr.a.vreg.size = X64_SZ_L;
+                EMIT2(MOV, L, SRC, MREG(R_RAX, L));
+                break;
+            case TP_L:
+                vvr.a.vreg.size = X64_SZ_Q;
+                EMIT2(MOV, Q, SRC, RAX);
+                break;
+            case TP_S:
+                vvr.a.vreg.size = X64_SZ_S;
+                EMIT2(MOVS, S, SRC, XMM0);
+                break;
+            case TP_D:
+                vvr.a.vreg.size = X64_SZ_D;
+                EMIT2(MOVS, D, SRC, XMM0);
+                break;
+            case TP_SB:
+            case TP_UB:
+                vvr.a.vreg.size = X64_SZ_B;
+                EMIT2(MOV, B, SRC, MREG(R_RAX, B));
+                break;
+            case TP_SH:
+            case TP_UH:
+                vvr.a.vreg.size = X64_SZ_W;
+                EMIT2(MOV, W, SRC, MREG(R_RAX, W));
+                break;
+#undef SRC
+            default:
+                fail("FUNCDEF must return [ABITY]");
+            }
+        }
+    }
+    EMIT2(MOV, Q, RBP, RSP);
+    EMIT1(POP, Q, RBP);
+    EMIT0(RET, NONE);
 }
 
 static void isel(Instr instr) {
