@@ -45,9 +45,12 @@ static VReg find_or_alloc_tmp(Ident ident, uint8_t sz) {
     for (i = 0; i < ctx.tmp_cnt; ++i)
         if (Ident_eq(ident, ctx.tmp[i].ident)) {
             vreg.id = ctx.tmp[i].id;
+            if (sz == X64_SZ_NONE)
+                vreg.size = ctx.tmp_sz[i];
             return vreg;
         }
     assert(ctx.tmp_cnt < countof(ctx.tmp));
+    check(sz != X64_SZ_NONE, "use before define of TMP detected");
     ctx.tmp[ctx.tmp_cnt].ident = ident;
     ctx.tmp[ctx.tmp_cnt].id = ctx.tmp_cnt+1;
     ctx.tmp_sz[ctx.tmp_cnt] = sz;
@@ -496,24 +499,230 @@ static void emit_prologue(void) {
     emit_reg_save(used_int_regs, used_sse_regs, prev_stk_arg_size);
 }
 
+typedef struct VisitValueResult {
+    uint8_t t; /* AP_xxx */
+    AsmInstrArg a;
+} VisitValueResult;
+
+/* avail_mreg is not guaranteed to be used.
+
+   in fact, it will only be used for getting global symbol addr, so:
+   1. avail_mreg should always be an int reg;
+   2. is avail_mreg is used, input Value is guaranteed not to be FP. */
+static VisitValueResult
+visit_value(Value v, uint8_t avail_mreg, uint8_t vreg_sz) {
+    VisitValueResult r = {0};
+    switch (v.t) {
+    case V_CI:
+        r.t = AP_I64;
+        r.a.i64 = v.u.u64;
+        return r;
+    case V_CS:
+        r.t = AP_F32;
+        r.a.f32 = v.u.s;
+        return r;
+    case V_CD:
+        r.t = AP_F64;
+        r.a.f64 = v.u.d;
+        return r;
+    case V_CSYM:
+        EMIT2(LEA, Q, SYM(v.u.global_ident), FAKE);
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
+        /* now the symbol address is at %avail_mreg. */
+        r.t = AP_MREG;
+        r.a.mreg = mreg(X64_SZ_Q, avail_mreg, 0, 0);
+        return r;
+    case V_CTHS:
+        EMIT2(MOV, Q, I64(0), FAKE);
+        LAST_INSTR.arg0_use_fs = 1;
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
+        EMIT2(LEA, Q, SYM_TPOFF(v.u.thread_ident, avail_mreg), FAKE);
+        LAST_INSTR.arg[1].mreg.mreg = avail_mreg;
+        /* now the symbol address is at %avail_mreg. */
+        r.t = AP_MREG;
+        r.a.mreg = mreg(X64_SZ_Q, avail_mreg, 0, 0);
+        return r;
+    case V_TMP:
+        /* prohibit visiting usage before def */
+        r.t = AP_VREG;
+        r.a.vreg = find_or_alloc_tmp(v.u.tmp_ident, vreg_sz);
+        return r;
+    default: break;
+    }
+    fail("unrecognized VALUE type");
+    return r; /* unreachable */
+}
+
 #define isel_alloc16 isel_alloc
 #define isel_alloc4  isel_alloc
 #define isel_alloc8  isel_alloc
 
 static void isel_alloc(Instr instr) {
-    (void)instr;
-    fail("not implemented");
+    VReg dst = find_or_alloc_tmp(instr.ident, X64_SZ_Q);
+    if (ctx.is_first_blk && instr.u.args[0].t == V_CI) {
+        uint32_t sz = (instr.u.args[0].u.u64 + 7) & ~7;
+        if (instr.t == I_ALLOC16)
+            asm_func.alloc_sz = (asm_func.alloc_sz + 15) & ~15;
+        EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz), VREG(dst));
+        asm_func.alloc_sz += sz;
+    } else {
+        asm_func.has_dyn_alloc = 1;
+        if (instr.u.args[0].t == V_CI) {
+            uint32_t sz = (instr.u.args[0].u.u64 + 7) & ~7;
+            if (instr.t == I_ALLOC16)
+                sz += 8;
+            if (sz > 0) /* avoid subq $0, %rsp, which has special meaning */
+                EMIT2(SUB, Q, I64(sz), RSP);
+        } else {
+            VisitValueResult vvr =
+                visit_value(instr.u.args[0], R_R10, X64_SZ_L);
+            EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+            EMIT2(ADD, Q, I64(7), R10);
+            EMIT2(AND, Q, I64(~7), R10);
+            if (instr.t == I_ALLOC16)
+                EMIT2(ADD, Q, I64(8), R10);
+            EMIT2(SUB, Q, R10, RSP);
+        }
+        EMIT2(MOV, Q, RSP, VREG(dst));
+        if (instr.t == I_ALLOC16) {
+            EMIT2(ADD, Q, I64(15), VREG(dst));
+            EMIT2(AND, Q, I64(~15), VREG(dst));
+        }
+    }
 }
 
-static void isel_cnel(Instr instr) {
+#define cmp_int_impl(op,s,xs,xop) \
+    static void isel_c##op##s(Instr instr) { \
+        VReg dst = find_or_alloc_tmp( \
+            instr.ident, instr.ret_t.t == TP_W ? X64_SZ_L : X64_SZ_Q); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10, X64_SZ_##xs); \
+        VisitValueResult y = visit_value(instr.u.args[1], R_R11, X64_SZ_##xs); \
+        if (instr.ret_t.t == TP_W) \
+            EMIT2(MOV, L, I64(0), VREG(dst)); \
+        else \
+            EMIT2(MOV, Q, I64(0), VREG(dst)); \
+        dst.size = X64_SZ_B; \
+        EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_R10,xs)); \
+        EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_R11,xs)); \
+        EMIT2(CMP, xs, MREG(R_R11,xs), MREG(R_R10,xs)); \
+        EMIT1(xop, NONE, VREG(dst)); \
+    }
+#define cmp_int(op,xop) \
+    cmp_int_impl(op,w,L,xop) \
+    cmp_int_impl(op,l,Q,xop)
+
+/* eq/ne for fp needs special treatment.
+   (ucomisd NaN, NaN) sets ZF=1 but (NaN cmp NaN) is false. */
+
+static void isel_clts(Instr);
+static void isel_cltd(Instr);
+static void isel_cles(Instr);
+static void isel_cled(Instr);
+
+#define cmp_sse_impl(op,s,xs,xop) \
+    static void isel_c##op##s(Instr instr) { \
+        VReg dst = find_or_alloc_tmp( \
+            instr.ident, instr.ret_t.t == TP_W ? X64_SZ_L : X64_SZ_Q); \
+        /* visit_value: xmm8/xmm9 not used */ \
+        VisitValueResult x = \
+            visit_value(instr.u.args[0], R_XMM8, X64_SZ_##xs); \
+        VisitValueResult y = \
+            visit_value(instr.u.args[1], R_XMM9, X64_SZ_##xs); \
+        if (instr.ret_t.t == TP_W) \
+            EMIT2(MOV, L, I64(0), VREG(dst)); \
+        else \
+            EMIT2(MOV, Q, I64(0), VREG(dst)); \
+        dst.size = X64_SZ_B; \
+        if (A_##xop == A_SETE || A_##xop == A_SETNE) \
+            EMIT2(MOV, Q, I64(0), MREG(R_R11,Q)); \
+        EMIT2(MOVS, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
+        EMIT2(MOVS, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
+        if (isel_c##op##s == isel_clts || isel_c##op##s == isel_cles || \
+            isel_c##op##s == isel_cltd || isel_c##op##s == isel_cled) { \
+            EMIT2(UCOMIS, xs, MREG(R_XMM8,xs), MREG(R_XMM9,xs)); \
+        } else { \
+            EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
+        } \
+        EMIT1(xop, NONE, VREG(dst)); \
+        if (A_##xop == A_SETE) { \
+            EMIT1(SETNP, NONE, MREG(R_R11,B)); \
+            EMIT2(AND, B, MREG(R_R11,B), VREG(dst)); \
+        } else if (A_##xop == A_SETNE) { \
+            EMIT1(SETP, NONE, MREG(R_R11,B)); \
+            EMIT2(OR, B, MREG(R_R11,B), VREG(dst)); \
+        } \
+    }
+#define cmp_sse(op,xop) \
+    cmp_sse_impl(op,s,S,xop) \
+    cmp_sse_impl(op,d,D,xop)
+
+cmp_int(eq, SETE)
+cmp_int(ne, SETNE)
+cmp_int(sle, SETLE)
+cmp_int(slt, SETL)
+cmp_int(sge, SETGE)
+cmp_int(sgt, SETG)
+cmp_int(ule, SETBE)
+cmp_int(ult, SETB)
+cmp_int(uge, SETAE)
+cmp_int(ugt, SETA)
+
+cmp_sse(eq, SETE)
+cmp_sse(ne, SETNE)
+cmp_sse(le, SETAE) /* swap operands for NaN */
+cmp_sse(lt, SETA) /* swap operands for NaN */
+cmp_sse(ge, SETAE)
+cmp_sse(gt, SETA)
+cmp_sse(o, SETNP)
+cmp_sse(uo, SETP)
+
+static void isel_ret(Instr instr) {
     (void)instr;
-    fail("not implemented");
+    // TODO: implement ret
 }
 
 static void isel(Instr instr) {
     switch (instr.t) {
+    case I_ALLOC16: isel_alloc16(instr); return;
+    case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
+    case I_CEQD: isel_ceqd(instr); return;
+    case I_CEQL: isel_ceql(instr); return;
+    case I_CEQS: isel_ceqs(instr); return;
+    case I_CEQW: isel_ceqw(instr); return;
+    case I_CGED: isel_cged(instr); return;
+    case I_CGES: isel_cges(instr); return;
+    case I_CGTD: isel_cgtd(instr); return;
+    case I_CGTS: isel_cgts(instr); return;
+    case I_CLED: isel_cled(instr); return;
+    case I_CLES: isel_cles(instr); return;
+    case I_CLTD: isel_cltd(instr); return;
+    case I_CLTS: isel_clts(instr); return;
+    case I_CNED: isel_cned(instr); return;
     case I_CNEL: isel_cnel(instr); return;
+    case I_CNES: isel_cnes(instr); return;
+    case I_CNEW: isel_cnew(instr); return;
+    case I_COD: isel_cod(instr); return;
+    case I_COS: isel_cos(instr); return;
+    case I_CSGEL: isel_csgel(instr); return;
+    case I_CSGEW: isel_csgew(instr); return;
+    case I_CSGTL: isel_csgtl(instr); return;
+    case I_CSGTW: isel_csgtw(instr); return;
+    case I_CSLEL: isel_cslel(instr); return;
+    case I_CSLEW: isel_cslew(instr); return;
+    case I_CSLTL: isel_csltl(instr); return;
+    case I_CSLTW: isel_csltw(instr); return;
+    case I_CUGEL: isel_cugel(instr); return;
+    case I_CUGEW: isel_cugew(instr); return;
+    case I_CUGTL: isel_cugtl(instr); return;
+    case I_CUGTW: isel_cugtw(instr); return;
+    case I_CULEL: isel_culel(instr); return;
+    case I_CULEW: isel_culew(instr); return;
+    case I_CULTL: isel_cultl(instr); return;
+    case I_CULTW: isel_cultw(instr); return;
+    case I_CUOD: isel_cuod(instr); return;
+    case I_CUOS: isel_cuos(instr); return;
+    case I_RET: isel_ret(instr); return;
     }
     fail("unrecognized instr type %d", instr.t);
 }
