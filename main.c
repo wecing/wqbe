@@ -6,7 +6,7 @@
 static int dump_debug_info = 0;
 static ParseResult ir;
 static FILE *fout;
-static int use_naive = 0;
+static int use_naive = 1; // TODO: turn off by default
 
 static void dump_all(const char *prompt) {
     if (!dump_debug_info) return;

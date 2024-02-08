@@ -19,7 +19,8 @@ static int next_ag_id = 1;
 static DataDef data_def_pool[4 * 1024]; /* 4 * 40 KB */
 static int next_data_def_id = 1;
 
-static Instr instr_pool[64 * 1024]; /* 64 * 48 KB */
+#define INSTR_PER_PAGE 1024
+static Instr *instr_pages[64]; /* <= 64 * 48 KB */
 static int next_instr_id = 1;
 
 static Block blk_pool[16 * 1024]; /* 16 * 16 KB */
@@ -286,14 +287,17 @@ Block *Block_get(uint16_t id) {
 }
 
 uint32_t Instr_alloc(void) {
-    assert((uint64_t) next_instr_id < countof(instr_pool));
+    const int page_id = next_instr_id / INSTR_PER_PAGE;
+    assert((uint64_t) page_id < countof(instr_pages));
+    if (instr_pages[page_id] == 0)
+        instr_pages[page_id] = calloc(INSTR_PER_PAGE, sizeof(Instr));
     return next_instr_id++;
 }
 
 Instr *Instr_get(uint32_t id) {
     if (id == 0) return 0;
     assert((int) id < next_instr_id);
-    return &instr_pool[id];
+    return &instr_pages[id / INSTR_PER_PAGE][id % INSTR_PER_PAGE];
 }
 
 static void dump_type(Type t) {
@@ -698,13 +702,16 @@ static void DataDef_cleanup(void) {
 static void Instr_cleanup(void) {
     int i;
     for (i = 1; i < next_instr_id; ++i) {
-        if (instr_pool[i].t == I_CALL) {
-            if (instr_pool[i].u.call.args)
-                free(instr_pool[i].u.call.args);
-        } else if (instr_pool[i].t == I_PHI) {
-            if (instr_pool[i].u.phi.args)
-                free(instr_pool[i].u.phi.args);
+        Instr *p = &instr_pages[i / INSTR_PER_PAGE][i % INSTR_PER_PAGE];
+        if (p->t == I_CALL) {
+            if (p->u.call.args)
+                free(p->u.call.args);
+        } else if (p->t == I_PHI) {
+            if (p->u.phi.args)
+                free(p->u.phi.args);
         }
+        if ((i+1) % INSTR_PER_PAGE == 0)
+            free(instr_pages[i / INSTR_PER_PAGE]);
     }
 }
 
