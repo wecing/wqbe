@@ -7,7 +7,6 @@
 static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
     uint16_t blk_id;
     Block *blk;
-    uint32_t instr_id, last_instr_id;
     Instr *instr;
 
     blk_id = fd->blk_id;
@@ -20,22 +19,10 @@ static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
     check(blk_id, "block %s not found in function %s",
           Ident_to_str(blk_ident), Ident_to_str(fd->ident));
 
-    cp.next_id = 0;
-    instr_id = Instr_alloc();
-    *Instr_get(instr_id) = cp;
+    instr = Instr_alloc();
+    *instr = cp;
 
-    last_instr_id = blk->instr_id;
-    while (last_instr_id) {
-        instr = Instr_get(last_instr_id);
-        if (instr->next_id == 0)
-            break;
-        last_instr_id = instr->next_id;
-    }
-
-    if (last_instr_id)
-        instr->next_id = instr_id;
-    else
-        blk->instr_id = instr_id;
+    Block_append_before_jump(blk, instr);
 }
 
 /* insert dummy blocks so that phi nodes always refer to jmp labels. e.g.
@@ -85,7 +72,7 @@ static void blk_append(FuncDef *fd, Ident blk_ident, Instr cp) {
  *         ret 0
  */
 static void fix_jnz(FuncDef *fd, Block *blk) {
-    Instr *jnz = Instr_get(blk->jump_id);
+    Instr *jnz = blk->dummy_tail->prev;
     Ident *dst_list[2];
     static uint32_t num = 0;
     int i;
@@ -104,7 +91,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
 
         char buf[30];
         Ident new_blk_ident;
-        uint32_t instr_id;
+        Instr *instr;
 
         /* find block `*dst_list[i]` */
         while (dst_blk_id) {
@@ -117,8 +104,7 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
               "block %s not found", Ident_to_str(*dst_list[i]));
 
         /* only append block if dst block has phi */
-        if (dst_blk->instr_id == 0) continue;
-        if (Instr_get(dst_blk->instr_id)->t != I_PHI) continue;
+        if (dst_blk->dummy_head->next->t != I_PHI) continue;
 
         num++;
         assert(num <= 65535 && "too many fix_jnz() calls");
@@ -126,12 +112,9 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
         new_blk_ident = Ident_from_str(buf);
 
         /* update dst block phi nodes */
-        instr_id = dst_blk->instr_id;
-        while (instr_id) {
+        instr = dst_blk->dummy_head->next;
+        for (; instr->t == I_PHI; instr = instr->next) {
             int j;
-            Instr *instr = Instr_get(instr_id);
-            instr_id = instr->next_id;
-            if (instr->t != I_PHI) break;
             for (j = 0; instr->u.phi.args[j].v.t != V_UNKNOWN; ++j) {
                 if (Ident_eq(instr->u.phi.args[j].ident, blk->ident))
                     instr->u.phi.args[j].ident = new_blk_ident;
@@ -142,12 +125,12 @@ static void fix_jnz(FuncDef *fd, Block *blk) {
         new_blk_id = Block_alloc();
         new_blk = Block_get(new_blk_id);
         new_blk->ident = new_blk_ident;
-        new_blk->jump_id = Instr_alloc();
         new_blk->next_id = blk->next_id;
         blk->next_id = new_blk_id;
-        new_jmp = Instr_get(new_blk->jump_id);
+        new_jmp = Instr_alloc();
         new_jmp->t = I_JMP;
         new_jmp->u.jump.dst = *dst_list[i];
+        Block_append(new_blk, new_jmp);
 
         /* update jnz */
         *dst_list[i] = new_blk_ident;
@@ -165,7 +148,6 @@ void dephi(FuncDef *fd) {
     char buf[30];
 
     cp.t = I_COPY;
-    cp.next_id = 0;
 
     v.t = V_TMP;
 
@@ -173,13 +155,12 @@ void dephi(FuncDef *fd) {
     while (blk_id) {
         blk = Block_get(blk_id);
         blk_id = blk->next_id;
-        if (Instr_get(blk->jump_id)->t == I_JNZ)
+        if (blk->dummy_tail->prev->t == I_JNZ)
             fix_jnz(fd, blk);
     }
 
     blk_id = fd->blk_id;
     while (blk_id) {
-        uint32_t instr_id;
         int phi_cnt = 0;
         Ident *v_idents = 0;
 
@@ -218,21 +199,12 @@ void dephi(FuncDef *fd) {
          */
 
         /* backup old value */
-        instr_id = blk->instr_id;
-        while (instr_id) {
-            p = Instr_get(instr_id);
-            instr_id = p->next_id;
-            if (p->t != I_PHI) break;
+        for (p = blk->dummy_head->next; p->t == I_PHI; p = p->next)
             phi_cnt++;
-        }
         if (phi_cnt)
             v_idents = malloc(sizeof(Ident) * phi_cnt);
         j = 0;
-        instr_id = blk->instr_id;
-        while (instr_id) {
-            p = Instr_get(instr_id);
-            instr_id = p->next_id;
-            if (p->t != I_PHI) break;
+        for (p = blk->dummy_head->next; p->t == I_PHI; p = p->next) {
             num++;
 
             /* just a random safety check */
@@ -254,9 +226,7 @@ void dephi(FuncDef *fd) {
 
         /* overwrite old value, remove phi */
         j = 0;
-        while (blk->instr_id) {
-            p = Instr_get(blk->instr_id);
-            if (p->t != I_PHI) break;
+        for (p = blk->dummy_head->next; p->t == I_PHI; p = p->next) {
             /* add e.g. %a =w copy %dephi.42 */
             for (i = 0; p->u.phi.args[i].v.t != V_UNKNOWN; ++i) {
                 cp.ret_t = p->ret_t;
@@ -266,8 +236,14 @@ void dephi(FuncDef *fd) {
                 blk_append(fd, p->u.phi.args[i].ident, cp);
             }
             j++;
-            /* discard instr. */
-            blk->instr_id = p->next_id;
+            /* do not discard p yet; we still need p->next */
+        }
+        /* discard instr between dummy_head and p (exclusive) */
+        while (blk->dummy_head->next != p) {
+            Instr *t = blk->dummy_head->next;
+            t->next->prev = t->prev;
+            t->prev->next = t->next;
+            Instr_free(t);
         }
 
         if (v_idents)

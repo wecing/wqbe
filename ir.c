@@ -20,10 +20,11 @@ static DataDef data_def_pool[4 * 1024]; /* 4 * 40 KB */
 static int next_data_def_id = 1;
 
 #define INSTR_PER_PAGE 1024
-static Instr *instr_pages[64]; /* <= 64 * 48 KB */
+static Instr *instr_pages[64]; /* <= 64 * 64 KB */
 static int next_instr_id = 1;
+static Instr *free_instr_chain = 0; /* singly linked */
 
-static Block blk_pool[16 * 1024]; /* 16 * 16 KB */
+static Block blk_pool[16 * 1024]; /* 16 * 24 KB */
 static int next_blk_id = 1;
 
 static FuncDef func_def_pool[1024]; /* 48 KB */
@@ -276,7 +277,13 @@ FuncDef *FuncDef_get(uint16_t id) {
 }
 
 uint16_t Block_alloc(void) {
+    Block *p;
     assert((uint64_t) next_blk_id < countof(blk_pool));
+    p = &blk_pool[next_blk_id];
+    p->dummy_head = Instr_alloc();
+    p->dummy_tail = Instr_alloc();
+    p->dummy_head->next = p->dummy_tail;
+    p->dummy_tail->prev = p->dummy_head;
     return next_blk_id++;
 }
 
@@ -286,18 +293,38 @@ Block *Block_get(uint16_t id) {
     return &blk_pool[id];
 }
 
-uint32_t Instr_alloc(void) {
-    const int page_id = next_instr_id / INSTR_PER_PAGE;
-    assert((uint64_t) page_id < countof(instr_pages));
-    if (instr_pages[page_id] == 0)
-        instr_pages[page_id] = calloc(INSTR_PER_PAGE, sizeof(Instr));
-    return next_instr_id++;
+void Block_append(Block *blk, Instr *instr) {
+    instr->next = blk->dummy_tail;
+    instr->prev = blk->dummy_tail->prev;
+    instr->next->prev = instr;
+    instr->prev->next = instr;
 }
 
-Instr *Instr_get(uint32_t id) {
-    if (id == 0) return 0;
-    assert((int) id < next_instr_id);
-    return &instr_pages[id / INSTR_PER_PAGE][id % INSTR_PER_PAGE];
+void Block_append_before_jump(Block *blk, Instr *instr) {
+    instr->next = blk->dummy_tail->prev;
+    instr->prev = instr->next->prev;
+    instr->next->prev = instr;
+    instr->prev->next = instr;
+}
+
+Instr *Instr_alloc(void) {
+    if (free_instr_chain) {
+        Instr *r = free_instr_chain;
+        free_instr_chain = r->next;
+        memset(r, 0, sizeof(*r));
+        return r;
+    } else {
+        const int page_id = next_instr_id / INSTR_PER_PAGE;
+        assert((uint64_t) page_id < countof(instr_pages));
+        if (instr_pages[page_id] == 0)
+            instr_pages[page_id] = calloc(INSTR_PER_PAGE, sizeof(Instr));
+        return &instr_pages[page_id][next_instr_id++ % INSTR_PER_PAGE];
+    }
+}
+
+void Instr_free(Instr *p) {
+    p->next = free_instr_chain;
+    free_instr_chain = p;
 }
 
 static void dump_type(Type t) {
@@ -575,27 +602,23 @@ void ir_dump_datadef(uint16_t id) {
     }
 }
 
-static void dump_instr_single(uint32_t id) {
-    Instr_dump(*Instr_get(id));
+static void dump_instr_single(Instr *instr) {
+    Instr_dump(*instr);
     printf("\n");
 }
 
 static void dump_block(uint16_t id) {
     Block *blk;
-    uint32_t instr_id;
+    Instr *instr;
 
     while (id) {
         blk = Block_get(id);
         printf("%s\n", Ident_to_str(blk->ident));
-        instr_id = blk->instr_id;
-        while (instr_id) {
+        instr = blk->dummy_head->next;
+        while (instr != blk->dummy_tail) {
             printf("    ");
-            dump_instr_single(instr_id);
-            instr_id = Instr_get(instr_id)->next_id;
-        }
-        if (blk->jump_id) {
-            printf("    ");
-            dump_instr_single(blk->jump_id);
+            dump_instr_single(instr);
+            instr = instr->next;
         }
         id = blk->next_id;
     }

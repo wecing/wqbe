@@ -734,14 +734,12 @@ static void expect_call_args(Instr *p) {
  *
  * [%IDENT '=' ABITY] OPNAME VAL [, VAL]
  */
-static uint32_t expect_instr(void) {
-    uint32_t id;
+static Instr *expect_instr(void) {
     Instr *p;
     int i, args_cap;
     int c;
 
-    id = Instr_alloc();
-    p = Instr_get(id);
+    p = Instr_alloc();
     if (_peekc() == '%') {
         p->ident = expect_ident();
         skip_space();
@@ -839,7 +837,7 @@ static uint32_t expect_instr(void) {
     }
 
     expect_space_nl();
-    return id;
+    return p;
 }
 
 /*
@@ -854,7 +852,6 @@ static uint32_t expect_instr(void) {
 static uint16_t expect_block(void) {
     uint16_t blk_id;
     Block *blk;
-    uint32_t instr_id, last_instr_id = 0;
     Instr *instr;
     int seen_non_phi = 0;
     int seen_jump = 0;
@@ -863,34 +860,22 @@ static uint16_t expect_block(void) {
     blk = Block_get(blk_id);
     check(_peekc() == '@', "@IDENT expected for BLOCK");
     blk->ident = expect_ident();
-    blk->instr_id = 0;
-    blk->jump_id = 0;
     expect_space_nl();
     while (_peekc() != '@' && _peekc() != '}') {
         check(!seen_jump, "at most one JUMP expected in BLOCK");
-        instr_id = expect_instr();
-        instr = Instr_get(instr_id);
+        instr = expect_instr();
         switch (instr->t) {
         case I_PHI:
             check(!seen_non_phi, "PHI must only appear at beginning of BLOCK");
-            if (!blk->instr_id)
-                blk->instr_id = instr_id;
-            else
-                Instr_get(last_instr_id)->next_id = instr_id;
             break;
         case I_JMP: case I_JNZ: case I_RET: case I_HLT:
             seen_non_phi = 1;
             seen_jump = 1;
-            blk->jump_id = instr_id;
             break;
         default:
-            if (!blk->instr_id)
-                blk->instr_id = instr_id;
-            else
-                Instr_get(last_instr_id)->next_id = instr_id;
             seen_non_phi = 1;
         }
-        last_instr_id = instr_id; /* JUMP instr's next_id won't be set */
+        Block_append(blk, instr);
     }
     return blk_id;
 }
@@ -940,13 +925,19 @@ static uint16_t expect_funcdef(Linkage linkage) {
     blk_id = fd->blk_id;
     while (blk_id != 0) {
         blk = Block_get(blk_id);
-        if (blk->jump_id == 0) {
+        switch (blk->dummy_tail->prev->t) {
+        case I_HLT:
+        case I_JMP:
+        case I_JNZ:
+        case I_RET:
+            break;
+        default:
             check(blk->next_id != 0, "implicit jump with no successor");
-            blk->jump_id = Instr_alloc();
-            instr = Instr_get(blk->jump_id);
+            instr = Instr_alloc();
             instr->t = I_JMP;
             instr->ret_t.t = TP_UNKNOWN;
             instr->u.jump.dst = Block_get(blk->next_id)->ident;
+            Block_append(blk, instr);
         }
         blk_id = blk->next_id;
     }

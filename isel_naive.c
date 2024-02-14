@@ -646,23 +646,19 @@ static void emit_reg_save(uint8_t used_int_regs, uint8_t used_sse_regs,
     static uint8_t int_regs[] = {R_RDI, R_RSI, R_RDX, R_RCX, R_R8, R_R9};
     static uint8_t sse_regs[] = {
         R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7};
-    int blk_id = ctx.fd.blk_id, instr_id = 0;
+    int blk_id = ctx.fd.blk_id;
     Block blk;
-    Instr instr;
     char buf[100];
     Ident skip_label;
     static int buf_suffix = 0;
 
     while (blk_id) {
+        Instr *p;
         blk = *Block_get(blk_id);
         blk_id = blk.next_id;
-        instr_id = blk.instr_id;
-        while (instr_id) {
-            instr = *Instr_get(instr_id);
-            instr_id = instr.next_id;
-            if (instr.t == I_VASTART)
+        for (p = blk.dummy_head->next; p != blk.dummy_tail; p = p->next)
+            if (p->t == I_VASTART)
                 goto proceed;
-        }
     }
     return;
 
@@ -1832,9 +1828,8 @@ static void isel(Instr instr) {
 
 AsmFunc *isel_naive_x64(FuncDef *fd) {
     uint16_t blk_id;
-    uint32_t instr_id;
     Block blk;
-    Instr instr;
+    Instr *instr;
 
     memset(&asm_func, 0, sizeof(asm_func));
     memset(&ctx, 0, sizeof(ctx));
@@ -1850,13 +1845,10 @@ AsmFunc *isel_naive_x64(FuncDef *fd) {
 
         emit_label(blk.ident);
 
-        instr_id = blk.instr_id;
-        while (instr_id) {
-            instr = *Instr_get(instr_id);
-            instr_id = instr.next_id;
-            isel(instr);
+        instr = blk.dummy_head->next;
+        for (; instr != blk.dummy_tail; instr = instr->next) {
+            isel(*instr);
         }
-        isel(*Instr_get(blk.jump_id));
         ctx.is_first_blk = 0;
     }
 

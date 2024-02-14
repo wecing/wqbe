@@ -138,9 +138,9 @@ enum {
     I_END
 };
 
-typedef struct Instr {
+typedef struct Instr Instr;
+struct Instr {
     uint32_t t:8;
-    uint32_t next_id:24;
     Type ret_t;
     Ident ident; /* optional */
     uint32_t blit_sz; /* I_BLIT only */
@@ -169,13 +169,15 @@ typedef struct Instr {
             Ident dst_else; /* jnz */
         } jump;
     } u;
-} Instr;
+    Instr *prev;
+    Instr *next;
+};
 
 typedef struct Block {
     Ident ident;
-    uint32_t instr_id; /* phi and regular instr chain */
-    uint32_t jump_id; /* not a chain; exactly one */
     uint16_t next_id;
+    Instr *dummy_head;
+    Instr *dummy_tail;
 } Block;
 
 typedef struct FuncDef {
@@ -296,8 +298,10 @@ uint16_t FuncDef_lookup(Ident);
 FuncDef *FuncDef_get(uint16_t);
 uint16_t Block_alloc(void);
 Block *Block_get(uint16_t);
-uint32_t Instr_alloc(void);
-Instr *Instr_get(uint32_t);
+void Block_append(Block *, Instr *);
+void Block_append_before_jump(Block *, Instr *);
+Instr *Instr_alloc(void);
+void Instr_free(Instr *);
 void Instr_dump(Instr);
 void ir_fix_typedef_size_align(void);
 uint16_t ir_add_dbgfile(const char *);

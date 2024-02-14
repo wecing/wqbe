@@ -96,9 +96,9 @@ int main(int argc, char *argv[]) {
     assert(sizeof(ArrType) == 8);
     assert(sizeof(AgType) == 16);
     assert(sizeof(DataDef) == 40);
-    assert(sizeof(Block) == 16);
+    assert(sizeof(Block) == 24);
     assert(sizeof(FuncDef) == 48);
-    assert(sizeof(Instr) == 48);
+    assert(sizeof(Instr) == 64);
     assert(sizeof(AsmInstr) == 24);
     assert(sizeof(((AsmFunc *) 0)->label[0]) == 8);
 
