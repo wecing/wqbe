@@ -55,3 +55,5 @@ A(UCOMIS,ucomis)
 A(UD2,ud2)
 A(XOR,xor)
 A(_AS_LOC,_as_loc) /* assembler .loc directive; lower case not used */
+A(_DUMMY_DEF,_dummy_def) /* fake DEF marker for register allocator */
+A(_DUMMY_USE,_dummy_use) /* fake USE marker for register allocator */

@@ -6,7 +6,7 @@
 static int dump_debug_info = 0;
 static ParseResult ir;
 static FILE *fout;
-static int use_naive = 1; // TODO: turn off by default
+static int use_naive = 0;
 
 static void dump_all(const char *prompt) {
     if (!dump_debug_info) return;
@@ -32,10 +32,8 @@ static void run_all_fd(uint16_t id, void (*f)(FuncDef *)) {
 }
 
 static void x64(FuncDef *fd) {
-    AsmFunc *af;
-
     if (use_naive) {
-        af = isel_naive_x64(fd);
+        AsmFunc *af = isel_naive_x64(fd);
         if (dump_debug_info) {
             printf("####################\n");
             printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
@@ -52,7 +50,7 @@ static void x64(FuncDef *fd) {
         }
         dump_x64(af, fd->linkage, fout);
     } else {
-        af = isel_x64(fd);
+        AsmFunc *af = isel_x64(fd);
         if (dump_debug_info) {
             printf("####################\n");
             printf("### %s after isel_x64()\n", Ident_to_str(fd->ident));
@@ -61,6 +59,7 @@ static void x64(FuncDef *fd) {
             printf("\n");
         }
 
+        af = ra_x64(af);
         // TODO: rest of the pipeline
     }
 }

@@ -339,3 +339,6 @@ AsmFunc *ra_naive_x64(AsmFunc *, uint16_t *);
 
 /* isel.c */
 AsmFunc *isel_x64(FuncDef *); /* returns borrowed memory */
+
+/* ra.c */
+AsmFunc *ra_x64(AsmFunc *);

@@ -72,6 +72,7 @@ static VReg find_or_alloc_tmp(Ident ident, uint8_t sz) {
 #define R10 MREG(R_R10,Q)
 #define R11 MREG(R_R11,Q)
 #define XMM0 MREG(R_XMM0,D)
+#define XMM1 MREG(R_XMM1,D)
 #define XMM8 MREG(R_XMM8,D)
 #define XMM9 MREG(R_XMM9,D)
 #define EAX MREG(R_RAX,L)
@@ -673,6 +674,7 @@ cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
 
 static void isel_ret(Instr instr) {
+    int used_int_regs = 0, used_sse_regs = 0;
     if (instr.u.jump.v.t != V_UNKNOWN) {
         VisitValueResult vvr = visit_value(instr.u.jump.v, R_R10, X64_SZ_Q);
         if (ctx.fd.ret_t.t == TP_AG) {
@@ -685,7 +687,6 @@ static void isel_ret(Instr instr) {
                 blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), tp_sz);
             } else {
                 int i;
-                int used_int_regs = 0, used_sse_regs = 0;
                 uint8_t *crp = (void*) &cr;
                 EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
                 for (i = 0; i < 2; ++i) {
@@ -709,28 +710,34 @@ static void isel_ret(Instr instr) {
             case TP_W:
                 vvr.a.vreg.size = X64_SZ_L;
                 EMIT2(MOV, L, SRC, MREG(R_RAX, L));
+                used_int_regs++;
                 break;
             case TP_L:
                 vvr.a.vreg.size = X64_SZ_Q;
                 EMIT2(MOV, Q, SRC, RAX);
+                used_int_regs++;
                 break;
             case TP_S:
                 vvr.a.vreg.size = X64_SZ_S;
                 EMIT2(MOVS, S, SRC, XMM0);
+                used_sse_regs++;
                 break;
             case TP_D:
                 vvr.a.vreg.size = X64_SZ_D;
                 EMIT2(MOVS, D, SRC, XMM0);
+                used_sse_regs++;
                 break;
             case TP_SB:
             case TP_UB:
                 vvr.a.vreg.size = X64_SZ_B;
                 EMIT2(MOV, B, SRC, MREG(R_RAX, B));
+                used_int_regs++;
                 break;
             case TP_SH:
             case TP_UH:
                 vvr.a.vreg.size = X64_SZ_W;
                 EMIT2(MOV, W, SRC, MREG(R_RAX, W));
+                used_int_regs++;
                 break;
 #undef SRC
             default:
@@ -738,6 +745,22 @@ static void isel_ret(Instr instr) {
             }
         }
     }
+
+    while (used_int_regs > 0) {
+        if (used_int_regs == 1)
+            EMIT1(_DUMMY_USE, NONE, RAX);
+        else
+            EMIT1(_DUMMY_USE, NONE, RDX);
+        used_int_regs--;
+    }
+    while (used_sse_regs > 0) {
+        if (used_sse_regs == 1)
+            EMIT1(_DUMMY_USE, NONE, XMM0);
+        else
+            EMIT1(_DUMMY_USE, NONE, XMM1);
+        used_sse_regs--;
+    }
+
     EMIT2(MOV, Q, RBP, RSP);
     EMIT1(POP, Q, RBP);
     EMIT0(RET, NONE);
