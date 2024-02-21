@@ -3,12 +3,13 @@
 #include "all.h"
 #include "x64.h"
 
-typedef struct UseDefSucc {
-    /* def/use: ends with R_END; mreg id => id; vreg id => id+R_END */
+typedef struct UseDef {
+    /* ends with R_END;
+       mreg id => id;
+       vreg id => id+R_END */
     uint32_t def[2];
     uint32_t use[3];
-    AsmInstr *succ[2]; /* ends with NULL */
-} UseDefSucc;
+} UseDef;
 
 enum GetRegIdFlag { USE, DEF };
 
@@ -34,17 +35,8 @@ static AsmInstr *get_instr_by_label(AsmFunc *fn, Ident ident) {
     return 0; /* unreachable */
 }
 
-static void verify_succ_ptr(AsmFunc *fn, AsmInstr *ip) {
-    size_t offset;
-    if (ip == 0) return;
-    offset = ip - fn->instr;
-    check(0 <= offset && offset < (size_t) countof(fn->instr),
-          "invalid succ pointer: out of range");
-    check(ip->t != A_UNKNOWN, "invalid succ pointer: not initialized");
-}
-
-static UseDefSucc get_uds(AsmFunc *fn, AsmInstr *ip) {
-    UseDefSucc r = { {R_END, R_END}, {R_END, R_END, R_END}, {0, 0} };
+static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
+    UseDef r = { {R_END, R_END}, {R_END, R_END, R_END} };
     switch (ip->t) {
     case A_MOV: case A_MOVQ: case A_MOVS:
     case A_MOVSB: case A_MOVSL: case A_MOVSW: case A_MOVZB: case A_MOVZW:
@@ -105,7 +97,7 @@ static UseDefSucc get_uds(AsmFunc *fn, AsmInstr *ip) {
         r.use[0] = R_RAX;
         break;
     case A_CALL:
-        // TODO: USE unused regs, DEF ret regs
+        // TODO: DEF unused regs, USE all regs, DEF ret regs
         break;
     case A_RET:
         /* nothing to do -- we rely on dummy USE marker */
@@ -116,27 +108,48 @@ static UseDefSucc get_uds(AsmFunc *fn, AsmInstr *ip) {
     default:
         fail("unsupported asm op: %d", ip->t);
     }
-
-    switch (ip->t) {
-    case A_RET: case A_UD2:
-        r.succ[0] = 0;
-        break;
-    case A_JE: case A_JL: case A_JNE:
-        r.succ[0] = ip + 1;
-        r.succ[1] = get_instr_by_label(fn, ip->arg[0].sym.ident);
-        break;
-    case A_JMP:
-        r.succ[0] = get_instr_by_label(fn, ip->arg[0].sym.ident);
-        break;
-    default:
-        r.succ[0] = ip + 1;
-        break;
-    }
-    verify_succ_ptr(fn, r.succ[0]);
-    verify_succ_ptr(fn, r.succ[1]);
-
     return r;
 }
+
+static void verify_succ_ptr(AsmFunc *fn, AsmInstr *ip) {
+    size_t offset;
+    if (ip == 0) return;
+    offset = ip - fn->instr;
+    check(0 <= offset && offset < (size_t) countof(fn->instr),
+          "invalid succ pointer: out of range");
+    check(ip->t != A_UNKNOWN, "invalid succ pointer: not initialized");
+}
+
+static void
+get_succ(AsmFunc *fn, AsmInstr *ip, AsmInstr **out1, AsmInstr **out2) {
+    switch (ip->t) {
+    case A_RET: case A_UD2:
+        *out1 = 0;
+        *out2 = 0;
+        break;
+    case A_JE: case A_JL: case A_JNE:
+        *out1 = ip + 1;
+        *out2 = get_instr_by_label(fn, ip->arg[0].sym.ident);
+        break;
+    case A_JMP:
+        *out1 = get_instr_by_label(fn, ip->arg[0].sym.ident);
+        *out2 = 0;
+        break;
+    default:
+        *out1 = ip + 1;
+        *out2 = 0;
+        break;
+    }
+    verify_succ_ptr(fn, *out1);
+    verify_succ_ptr(fn, *out2);
+}
+
+// TODO: build inference graph:
+//
+// use(l, x) => live(l, x)
+// live(l', x), succ(l, l'), not def(l, u) => live(l, u)
+//
+// def(l, x), succ(l, l'), live(l', u), x != u => inter(x, u)
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
     (void)in_ptr;
