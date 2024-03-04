@@ -1,7 +1,10 @@
+#include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "all.h"
 #include "x64.h"
+#include "tree.h"
 
 typedef struct UseDef {
     /* ends with R_END;
@@ -24,15 +27,6 @@ get_reg_id(uint8_t arg_t, union AsmInstrArg arg, enum GetRegIdFlag flag) {
     default:
         return R_END;
     }
-}
-
-static AsmInstr *get_instr_by_label(AsmFunc *fn, Ident ident) {
-    size_t i;
-    for (i = 0; i < countof(fn->label); ++i)
-        if (Ident_eq(ident, fn->label[i].ident))
-            return &fn->instr[fn->label[i].offset];
-    fail("label %s not found", Ident_to_str(ident));
-    return 0; /* unreachable */
 }
 
 static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
@@ -97,7 +91,9 @@ static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
         r.use[0] = R_RAX;
         break;
     case A_CALL:
-        // TODO: DEF unused regs, USE all regs, DEF ret regs
+        /* TODO: DEF unused regs, USE all regs, DEF ret regs */
+        (void)fn;
+        fail("ra.c: A_CALL not implemented");
         break;
     case A_RET:
         /* nothing to do -- we rely on dummy USE marker */
@@ -109,6 +105,15 @@ static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
         fail("unsupported asm op: %d", ip->t);
     }
     return r;
+}
+
+static AsmInstr *get_instr_by_label(AsmFunc *fn, Ident ident) {
+    size_t i;
+    for (i = 0; i < countof(fn->label); ++i)
+        if (Ident_eq(ident, fn->label[i].ident))
+            return &fn->instr[fn->label[i].offset];
+    fail("label %s not found", Ident_to_str(ident));
+    return 0; /* unreachable */
 }
 
 static void verify_succ_ptr(AsmFunc *fn, AsmInstr *ip) {
@@ -144,14 +149,250 @@ get_succ(AsmFunc *fn, AsmInstr *ip, AsmInstr **out1, AsmInstr **out2) {
     verify_succ_ptr(fn, *out2);
 }
 
-// TODO: build inference graph:
-//
-// use(l, x) => live(l, x)
-// live(l', x), succ(l, l'), not def(l, u) => live(l, u)
-//
-// def(l, x), succ(l, l'), live(l', u), x != u => inter(x, u)
+/* AsmInstrSet = Set<AsmInstr*> */
+struct AsmInstrSet_node {
+    RB_ENTRY(AsmInstrSet_node) entry;
+    AsmInstr *elem;
+};
+
+static int AsmInstrSet_cmp(
+        struct AsmInstrSet_node *left,
+        struct AsmInstrSet_node *right) {
+    if (left->elem < right->elem) return -1;
+    if (left->elem > right->elem) return 1;
+    return 0;
+}
+
+RB_HEAD(AsmInstrSet, AsmInstrSet_node);
+RB_GENERATE_STATIC(AsmInstrSet, AsmInstrSet_node, entry, AsmInstrSet_cmp)
+
+static int AsmInstrSet_contains(struct AsmInstrSet *set, AsmInstr *elem) {
+    struct AsmInstrSet_node find;
+
+    find.elem = elem;
+    return RB_FIND(AsmInstrSet, set, &find) != 0;
+}
+
+static void AsmInstrSet_add(struct AsmInstrSet *set, AsmInstr *elem) {
+    struct AsmInstrSet_node *node;
+
+    if (AsmInstrSet_contains(set, elem)) return;
+    node = calloc(1, sizeof(*node));
+    node->elem = elem;
+    RB_INSERT(AsmInstrSet, set, node);
+}
+
+/* RegSet = Set<uint32_t> */
+struct RegSet_node {
+    RB_ENTRY(RegSet_node) entry;
+    uint32_t reg;
+};
+
+static int RegSet_cmp(struct RegSet_node *left, struct RegSet_node *right) {
+    if (left->reg < right->reg) return -1;
+    if (left->reg > right->reg) return 1;
+    return 0;
+}
+
+RB_HEAD(RegSet, RegSet_node);
+RB_GENERATE_STATIC(RegSet, RegSet_node, entry, RegSet_cmp)
+
+static int RegSet_contains(struct RegSet *set, uint32_t reg) {
+    struct RegSet_node find;
+
+    find.reg = reg;
+    return RB_FIND(RegSet, set, &find) != 0;
+}
+
+static void RegSet_add(struct RegSet *set, uint32_t reg) {
+    struct RegSet_node *node;
+
+    if (RegSet_contains(set, reg)) return;
+    node = calloc(1, sizeof(*node));
+    node->reg = reg;
+    RB_INSERT(RegSet, set, node);
+}
+
+/* AsmInstrInfoMap = Map<AsmInstr*, ...> */
+struct AsmInstrInfoMap_node {
+    RB_ENTRY(AsmInstrInfoMap_node) entry;
+    AsmInstr *key;
+    struct AsmInstrSet succ; /* note: max len = 2 */
+    struct AsmInstrSet pred;
+    struct RegSet live;
+};
+
+static int AsmInstrInfoMap_cmp(
+        struct AsmInstrInfoMap_node *left,
+        struct AsmInstrInfoMap_node *right) {
+    if (left->key < right->key) return -1;
+    if (left->key > right->key) return 1;
+    return 0;
+}
+
+RB_HEAD(AsmInstrInfoMap, AsmInstrInfoMap_node);
+RB_GENERATE_STATIC(
+        AsmInstrInfoMap, AsmInstrInfoMap_node, entry, AsmInstrInfoMap_cmp)
+
+static struct AsmInstrInfoMap_node *
+AsmInstrInfoMap_find_or_add(struct AsmInstrInfoMap *map, AsmInstr *key) {
+    struct AsmInstrInfoMap_node find;
+    struct AsmInstrInfoMap_node *node;
+
+    find.key = key;
+    node = RB_FIND(AsmInstrInfoMap, map, &find);
+    if (!node) {
+        node = calloc(1, sizeof(*node));
+        node->key = key;
+        RB_INIT(&node->succ);
+        RB_INIT(&node->pred);
+        RB_INIT(&node->live);
+        RB_INSERT(AsmInstrInfoMap, map, node);
+    }
+    return node;
+}
+
+static int
+AsmInstrInfoMap_is_live(
+        struct AsmInstrInfoMap *map, AsmInstr *ip, uint32_t reg) {
+    struct AsmInstrInfoMap_node *node = AsmInstrInfoMap_find_or_add(map, ip);
+    return RegSet_contains(&node->live, reg);
+}
+
+static void
+AsmInstrInfoMap_mark_live(
+        struct AsmInstrInfoMap *map, AsmInstr *ip, uint32_t reg) {
+    struct AsmInstrInfoMap_node *node = AsmInstrInfoMap_find_or_add(map, ip);
+    RegSet_add(&node->live, reg);
+}
+
+/* InterGraph = Map<uint32_t, Set<uint32_t>> */
+struct InterGraph_node {
+    RB_ENTRY(InterGraph_node) entry;
+    uint32_t key;
+    struct RegSet values;
+};
+
+static int InterGraph_cmp(
+        struct InterGraph_node *left, struct InterGraph_node *right) {
+    if (left->key < right->key) return -1;
+    if (left->key > right->key) return 1;
+    return 0;
+}
+
+RB_HEAD(InterGraph, InterGraph_node);
+RB_GENERATE_STATIC(InterGraph, InterGraph_node, entry, InterGraph_cmp)
+
+static void record_edge(
+        struct AsmInstrInfoMap *map, AsmInstr *start, AsmInstr *end) {
+    struct AsmInstrInfoMap_node *map_node;
+
+    /* insert succ edge: start -> end */
+    map_node = AsmInstrInfoMap_find_or_add(map, start);
+    AsmInstrSet_add(&map_node->succ, end);
+
+    /* insert pred edge: end -> start */
+    map_node = AsmInstrInfoMap_find_or_add(map, end);
+    AsmInstrSet_add(&map_node->pred, start);
+}
+
+static int has_def(AsmFunc *fn, AsmInstr *ip, uint32_t reg) {
+    int i;
+    UseDef use_def = get_use_def(fn, ip);
+    const int DEF_CNT = (int) countof(use_def.def);
+    for (i = 0; i < DEF_CNT && use_def.def[i] != R_END; ++i)
+        if (use_def.def[i] == reg)
+            return 1;
+    return 0;
+}
+
+/* mark live by register.
+ *
+ * this method guarantees the existance of an l' such that:
+ * - succ(ip, l')
+ * - live(l', reg)
+ */
+static void inter_visit(
+        AsmFunc *fn,
+        struct AsmInstrInfoMap *map,
+        AsmInstr *ip,
+        uint32_t reg) {
+    struct AsmInstrInfoMap_node *node;
+    struct AsmInstrSet_node *pred;
+
+    /* already live: end backtracking */
+    if (AsmInstrInfoMap_is_live(map, ip, reg)) return;
+    /* not live here: end backtracking */
+    if (has_def(fn, ip, reg)) return;
+
+    AsmInstrInfoMap_mark_live(map, ip, reg);
+
+    node = AsmInstrInfoMap_find_or_add(map, ip);
+    RB_FOREACH(pred, AsmInstrSet, &node->pred) {
+        inter_visit(fn, map, pred->elem, reg);
+    }
+}
+
+/* interference graph rules:
+ *
+ * - live(l, x) <= use(l, x)
+ * - live(l, u) <= live(l', u), succ(l, l'), not def(l, u)
+ *
+ * - inter(x, u) <= def(l, x), succ(l, l'), live(l', u), x != u
+ */
+static struct InterGraph
+build_inter_graph(AsmFunc *fn) {
+    int i;
+    struct AsmInstrInfoMap info_map = RB_INITIALIZER(&info_map);
+    struct InterGraph inter_graph = RB_INITIALIZER(&inter_graph);
+
+    /* populate succ and pred, plus first rule of live */
+    for (i = 0; fn->instr[i].t != A_UNKNOWN; ++i) {
+        AsmInstr *ip = &fn->instr[i];
+        AsmInstr *s1, *s2;
+        UseDef use_def;
+        const int USE_CNT = (int) countof(use_def.use);
+        int j;
+
+        use_def = get_use_def(fn, ip);
+        for (j = 0; j < USE_CNT && use_def.use[j] != R_END; ++j) {
+            AsmInstrInfoMap_mark_live(&info_map, ip, use_def.use[j]);
+        }
+
+        get_succ(fn, ip, &s1, &s2);
+        if (!s1) continue;
+        record_edge(&info_map, ip, s1);
+        if (!s2) continue;
+        record_edge(&info_map, ip, s2);
+    }
+
+    /* second rule of live */
+    for (i = 0; fn->instr[i].t != A_UNKNOWN; ++i) {
+        AsmInstr *ip = &fn->instr[i];
+        struct AsmInstrInfoMap_node *node;
+
+        node = AsmInstrInfoMap_find_or_add(&info_map, ip);
+        if (RB_EMPTY(&node->succ)) {
+            struct AsmInstrSet_node *pred;
+            struct RegSet_node *live;
+            RB_FOREACH(live, RegSet, &node->live) {
+                RB_FOREACH(pred, AsmInstrSet, &node->pred) {
+                    inter_visit(fn, &info_map, pred->elem, live->reg);
+                }
+            }
+        }
+    }
+
+    // TODO: destroy info_map
+
+    return inter_graph;
+}
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
-    (void)in_ptr;
-    return 0; // TODO: implement ra_x64
+    struct InterGraph inter_graph;
+    inter_graph = build_inter_graph(in_ptr);
+
+    (void) inter_graph;
+
+    return 0; // TODO: implement ra_x64; clean up trees
 }

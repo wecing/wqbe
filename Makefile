@@ -23,7 +23,7 @@ wqbe: $(OBJ)
 .c.o:
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ): all.h instr.inc
+$(OBJ): all.h tree.h instr.inc
 $(X64_OBJ): x64.h x64.inc
 
 clean:
