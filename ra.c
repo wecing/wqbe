@@ -182,6 +182,14 @@ static void AsmInstrSet_add(struct AsmInstrSet *set, AsmInstr *elem) {
     RB_INSERT(AsmInstrSet, set, node);
 }
 
+static void AsmInstrSet_clear(struct AsmInstrSet *set) {
+    struct AsmInstrSet_node *node, *next;
+    RB_FOREACH_SAFE(node, AsmInstrSet, set, next) {
+        RB_REMOVE(AsmInstrSet, set, node);
+        free(node);
+    }
+}
+
 /* RegSet = Set<uint32_t> */
 struct RegSet_node {
     RB_ENTRY(RegSet_node) entry;
@@ -211,6 +219,14 @@ static void RegSet_add(struct RegSet *set, uint32_t reg) {
     node = calloc(1, sizeof(*node));
     node->reg = reg;
     RB_INSERT(RegSet, set, node);
+}
+
+static void RegSet_clear(struct RegSet *set) {
+    struct RegSet_node *node, *next;
+    RB_FOREACH_SAFE(node, RegSet, set, next) {
+        RB_REMOVE(RegSet, set, node);
+        free(node);
+    }
 }
 
 /* AsmInstrInfoMap = Map<AsmInstr*, ...> */
@@ -266,6 +282,17 @@ AsmInstrInfoMap_mark_live(
     RegSet_add(&node->live, reg);
 }
 
+static void AsmInstrInfoMap_clear(struct AsmInstrInfoMap *map) {
+    struct AsmInstrInfoMap_node *node, *next;
+    RB_FOREACH_SAFE(node, AsmInstrInfoMap, map, next) {
+        AsmInstrSet_clear(&node->succ);
+        AsmInstrSet_clear(&node->pred);
+        RegSet_clear(&node->live);
+        RB_REMOVE(AsmInstrInfoMap, map, node);
+        free(node);
+    }
+}
+
 /* InterGraph = Map<uint32_t, Set<uint32_t>> */
 struct InterGraph_node {
     RB_ENTRY(InterGraph_node) entry;
@@ -282,6 +309,29 @@ static int InterGraph_cmp(
 
 RB_HEAD(InterGraph, InterGraph_node);
 RB_GENERATE_STATIC(InterGraph, InterGraph_node, entry, InterGraph_cmp)
+
+static void InterGraph_add(
+        struct InterGraph *graph, uint32_t src, uint32_t dst) {
+    struct InterGraph_node find;
+    struct InterGraph_node *node;
+    find.key = src;
+    node = RB_FIND(InterGraph, graph, &find);
+    if (!node) {
+        node = calloc(1, sizeof(*node));
+        node->key = src;
+        RB_INIT(&node->values);
+    }
+    RegSet_add(&node->values, dst);
+}
+
+static void InterGraph_clear(struct InterGraph *graph) {
+    struct InterGraph_node *node, *next;
+    RB_FOREACH_SAFE(node, InterGraph, graph, next) {
+        RegSet_clear(&node->values);
+        RB_REMOVE(InterGraph, graph, node);
+        free(node);
+    }
+}
 
 static void record_edge(
         struct AsmInstrInfoMap *map, AsmInstr *start, AsmInstr *end) {
@@ -383,16 +433,41 @@ build_inter_graph(AsmFunc *fn) {
         }
     }
 
-    // TODO: destroy info_map
+    /* interference graph */
+    {
+        struct AsmInstrInfoMap_node *node;
+        struct AsmInstrSet_node *succ;
+        RB_FOREACH(node, AsmInstrInfoMap, &info_map) {
+            UseDef use_def = get_use_def(fn, node->key);
+            const int DEF_CNT = (int) countof(use_def.def);
+            for (i = 0; i < DEF_CNT && use_def.def[i] != R_END; ++i) {
+                uint32_t x = use_def.def[i];                  /* def(l, x) */
+                RB_FOREACH(succ, AsmInstrSet, &node->succ) {  /* succ(l, l') */
+                    struct AsmInstrInfoMap_node *node_succ =
+                        AsmInstrInfoMap_find_or_add(&info_map, succ->elem);
+                    struct RegSet_node *live;
+                    RB_FOREACH(live, RegSet, &node_succ->live) {
+                        uint32_t u = live->reg;               /* live(l', u) */
+                        if (x != u) {                         /* x != u */
+                            InterGraph_add(&inter_graph, x, u);
+                            InterGraph_add(&inter_graph, u, x);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    AsmInstrInfoMap_clear(&info_map);
 
     return inter_graph;
 }
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
     struct InterGraph inter_graph;
-    inter_graph = build_inter_graph(in_ptr);
 
-    (void) inter_graph;
+    inter_graph = build_inter_graph(in_ptr);
+    InterGraph_clear(&inter_graph);
 
     return 0; // TODO: implement ra_x64; clean up trees
 }
