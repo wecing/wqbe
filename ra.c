@@ -6,6 +6,50 @@
 #include "x64.h"
 #include "tree.h"
 
+/* RegSet = Set<uint32_t> */
+struct RegSet_node {
+    RB_ENTRY(RegSet_node) entry;
+    uint32_t reg;
+};
+
+static int RegSet_cmp(struct RegSet_node *left, struct RegSet_node *right) {
+    if (left->reg < right->reg) return -1;
+    if (left->reg > right->reg) return 1;
+    return 0;
+}
+
+RB_HEAD(RegSet, RegSet_node);
+RB_GENERATE_STATIC(RegSet, RegSet_node, entry, RegSet_cmp)
+
+static int RegSet_contains(struct RegSet *set, uint32_t reg) {
+    struct RegSet_node find;
+
+    find.reg = reg;
+    return RB_FIND(RegSet, set, &find) != 0;
+}
+
+static void RegSet_add(struct RegSet *set, uint32_t reg) {
+    struct RegSet_node *node;
+
+    if (RegSet_contains(set, reg)) return;
+    node = calloc(1, sizeof(*node));
+    node->reg = reg;
+    RB_INSERT(RegSet, set, node);
+}
+
+static void RegSet_clear(struct RegSet *set) {
+    struct RegSet_node *node, *next;
+    RB_FOREACH_SAFE(node, RegSet, set, next) {
+        RB_REMOVE(RegSet, set, node);
+        free(node);
+    }
+}
+
+static struct {
+    struct RegSet int_vregs;
+    struct RegSet sse_vregs;
+} ctx;
+
 typedef struct UseDef {
     /* ends with R_END;
        mreg id => id;
@@ -23,6 +67,10 @@ get_reg_id(uint8_t arg_t, union AsmInstrArg arg, enum GetRegIdFlag flag) {
         /* writing to 12(%rax) does not def %rax */
         return flag == DEF && arg.mreg.is_deref ? R_END : arg.mreg.mreg;
     case AP_VREG:
+        if (arg.vreg.size == SZ_S || arg.vreg.size == SZ_D)
+            RegSet_add(&ctx.sse_vregs, arg.vreg.id + R_END);
+        else
+            RegSet_add(&ctx.int_vregs, arg.vreg.id + R_END);
         return arg.vreg.id + R_END;
     default:
         return R_END;
@@ -190,45 +238,6 @@ static void AsmInstrSet_clear(struct AsmInstrSet *set) {
     }
 }
 
-/* RegSet = Set<uint32_t> */
-struct RegSet_node {
-    RB_ENTRY(RegSet_node) entry;
-    uint32_t reg;
-};
-
-static int RegSet_cmp(struct RegSet_node *left, struct RegSet_node *right) {
-    if (left->reg < right->reg) return -1;
-    if (left->reg > right->reg) return 1;
-    return 0;
-}
-
-RB_HEAD(RegSet, RegSet_node);
-RB_GENERATE_STATIC(RegSet, RegSet_node, entry, RegSet_cmp)
-
-static int RegSet_contains(struct RegSet *set, uint32_t reg) {
-    struct RegSet_node find;
-
-    find.reg = reg;
-    return RB_FIND(RegSet, set, &find) != 0;
-}
-
-static void RegSet_add(struct RegSet *set, uint32_t reg) {
-    struct RegSet_node *node;
-
-    if (RegSet_contains(set, reg)) return;
-    node = calloc(1, sizeof(*node));
-    node->reg = reg;
-    RB_INSERT(RegSet, set, node);
-}
-
-static void RegSet_clear(struct RegSet *set) {
-    struct RegSet_node *node, *next;
-    RB_FOREACH_SAFE(node, RegSet, set, next) {
-        RB_REMOVE(RegSet, set, node);
-        free(node);
-    }
-}
-
 /* AsmInstrInfoMap = Map<AsmInstr*, ...> */
 struct AsmInstrInfoMap_node {
     RB_ENTRY(AsmInstrInfoMap_node) entry;
@@ -298,6 +307,7 @@ struct InterGraph_node {
     RB_ENTRY(InterGraph_node) entry;
     uint32_t key;
     struct RegSet values;
+    uint32_t color; /* <= R_END: not colored or pre-colored (key is mreg) */
 };
 
 static int InterGraph_cmp(
@@ -319,6 +329,7 @@ static void InterGraph_add(
     if (!node) {
         node = calloc(1, sizeof(*node));
         node->key = src;
+        node->color = R_END;
         RB_INIT(&node->values);
     }
     RegSet_add(&node->values, dst);
@@ -466,8 +477,38 @@ build_inter_graph(AsmFunc *fn) {
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
     struct InterGraph inter_graph;
 
+    memset(&ctx, 0, sizeof(ctx));
+    RB_INIT(&ctx.int_vregs);
+    RB_INIT(&ctx.sse_vregs);
+
     inter_graph = build_inter_graph(in_ptr);
     InterGraph_clear(&inter_graph);
 
-    return 0; // TODO: implement ra_x64; clean up trees
+    // 1. get a list of all regs >R_END from InterGraph
+    // 2. sort the regs, preferably simplicial elimination ordering
+    // 3. then:
+    //      next_color = R_END+1
+    //      for r in regs:
+    //          if r < R_END:
+    //              r.color = r
+    //              continue
+    //          rs = inter_graph[r]
+    //          r1 = min int mreg not in rs, or None
+    //          r2 = min sse mreg not in rs, or None
+    //          if r in int_vregs:
+    //              r2 = None
+    //          if r in sse_vregs:
+    //              r1 = None
+    //
+    //          r.color = r1
+    //                 or r2
+    //                 or min >R_END not in rs
+    //                 or next_color++
+    // 4. rewrite all vreg as ALLOC
+    // 5. call ra_naive???
+
+    RegSet_clear(&ctx.int_vregs);
+    RegSet_clear(&ctx.sse_vregs);
+
+    return 0;
 }
