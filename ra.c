@@ -474,38 +474,140 @@ build_inter_graph(AsmFunc *fn) {
     return inter_graph;
 }
 
+int uint32_cmp(const void *px, const void *py) {
+    uint32_t x = *(uint32_t*)px;
+    uint32_t y = *(uint32_t*)py;
+    if (x < y) return -1;
+    if (x > y) return 1;
+    return 0;
+}
+
+/* fill InterGraph_node.color and return max used color. */
+uint32_t color_regs(struct InterGraph *graph) {
+    struct InterGraph_node *node;
+    int i, regs_cnt = 0, regs_cap = 10;
+    uint32_t *regs = malloc(regs_cap * sizeof(*regs));
+    uint32_t max_used_color = R_END; /* nothing except mregs */
+
+    /* get a list of all non-pre-colored regs from InterGraph */
+    RB_FOREACH(node, InterGraph, graph) {
+        if (node->key <= R_END)
+            continue;
+        if (regs_cnt == regs_cap) {
+            regs_cap *= 2;
+            regs = realloc(regs, regs_cap * sizeof(*regs));
+        }
+        regs[regs_cnt++] = node->key;
+    }
+
+    /* determine traversal ordering */
+    /* note: RB_FOREACH() traversal is ordered, so regs is sorted */
+    /* TODO: use simplicial elimination ordering */
+
+    /* color regs with greedy algorithm */
+    for (i = 0; i < regs_cnt; ++i) {
+        int j;
+        uint32_t avail_int_mreg = R_END;
+        uint32_t avail_sse_mreg = R_END;
+        static const uint32_t int_mregs[] = {
+            /* keep ordered by enum value */
+            R_RAX, R_RCX, R_RDX, R_RSI, R_RDI, R_R8, R_R9,
+            R_END
+        };
+        static const uint32_t sse_mregs[] = {
+            R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7,
+            R_XMM8, R_XMM9, R_XMM10, R_XMM11,
+            R_XMM12, R_XMM13, R_XMM14, R_XMM15,
+            R_END
+        };
+        struct InterGraph_node find;
+
+        find.key = regs[i];
+        node = RB_FIND(InterGraph, graph, &find);
+
+        /* find next mreg that does not interfere with current node */
+        if (!RegSet_contains(&ctx.sse_vregs, regs[i]))
+            for (j = 0; int_mregs[j] != R_END; ++j)
+                if (!RegSet_contains(&node->values, int_mregs[j])) {
+                    avail_int_mreg = int_mregs[j];
+                    break;
+                }
+        if (!RegSet_contains(&ctx.int_vregs, regs[i]))
+            for (j = 0; sse_mregs[j] != R_END; ++j)
+                if (!RegSet_contains(&node->values, sse_mregs[j])) {
+                    avail_sse_mreg = sse_mregs[j];
+                    break;
+                }
+
+        /* color with mreg is possible */
+        if (avail_int_mreg != R_END) {
+            node->color = avail_int_mreg != R_END;
+            continue;
+        }
+        if (avail_sse_mreg != R_END) {
+            node->color = avail_sse_mreg;
+            continue;
+        }
+
+        /* find next available color,
+           i.e. min >R_END not in graph[node->values].color */
+        {
+            int used_colors_cnt = 0, used_colors_cap = 10;
+            uint32_t *used_colors = malloc(used_colors_cap * sizeof(uint32_t));
+            struct RegSet_node *rs_node;
+
+            RB_FOREACH(rs_node, RegSet, &node->values) {
+                struct InterGraph_node *interf_node;
+
+                find.key = rs_node->reg;
+                interf_node = RB_FIND(InterGraph, graph, &find);
+                if (interf_node->color > R_END) {
+                    if (used_colors_cnt == used_colors_cap) {
+                        used_colors_cap += 10;
+                        used_colors = realloc(
+                                used_colors,
+                                used_colors_cap * sizeof(uint32_t));
+                    }
+                    used_colors[used_colors_cnt++] = interf_node->color;
+                }
+            }
+
+            qsort(used_colors, sizeof(used_colors[0]), used_colors_cnt,
+                    uint32_cmp);
+
+            for (j = 0; j < used_colors_cnt; ++j)
+                if (used_colors[j] != (uint32_t) (R_END + 1 + j))
+                    break;
+            node->color = R_END + 1 + j;
+
+            if (node->color > max_used_color)
+                max_used_color = node->color;
+
+            free(used_colors);
+        }
+    }
+
+    free(regs);
+
+    return max_used_color;
+}
+
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
     struct InterGraph inter_graph;
+    uint32_t max_used_color;  // R_END + extra_colors_used
 
     memset(&ctx, 0, sizeof(ctx));
     RB_INIT(&ctx.int_vregs);
     RB_INIT(&ctx.sse_vregs);
 
     inter_graph = build_inter_graph(in_ptr);
-    InterGraph_clear(&inter_graph);
+    max_used_color = color_regs(&inter_graph);
 
-    // 1. get a list of all regs >R_END from InterGraph
-    // 2. sort the regs, preferably simplicial elimination ordering
-    // 3. then:
-    //      next_color = R_END+1
-    //      for r in regs:
-    //          if r < R_END:
-    //              r.color = r
-    //              continue
-    //          rs = inter_graph[r]
-    //          r1 = min int mreg not in rs, or None
-    //          r2 = min sse mreg not in rs, or None
-    //          if r in int_vregs:
-    //              r2 = None
-    //          if r in sse_vregs:
-    //              r1 = None
-    //
-    //          r.color = r1
-    //                 or r2
-    //                 or min >R_END not in rs
-    //                 or next_color++
-    // 4. rewrite all vreg as ALLOC
+    // 4. rewrite all vreg as ALLOC/mreg
     // 5. call ra_naive???
+    (void)max_used_color;
+
+    InterGraph_clear(&inter_graph);
 
     RegSet_clear(&ctx.int_vregs);
     RegSet_clear(&ctx.sse_vregs);
