@@ -60,6 +60,13 @@ static void x64(FuncDef *fd) {
         }
 
         af = ra_x64(af);
+        if (dump_debug_info) {
+            printf("####################\n");
+            printf("### %s after ra_x64()\n", Ident_to_str(fd->ident));
+            printf("####################\n\n");
+            dump_x64(af, fd->linkage, stdout);
+            printf("\n");
+        }
         // TODO: rest of the pipeline
     }
 }

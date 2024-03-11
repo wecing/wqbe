@@ -320,6 +320,20 @@ static int InterGraph_cmp(
 RB_HEAD(InterGraph, InterGraph_node);
 RB_GENERATE_STATIC(InterGraph, InterGraph_node, entry, InterGraph_cmp)
 
+static void InterGraph_ensure(struct InterGraph *graph, uint32_t key) {
+    struct InterGraph_node find;
+    struct InterGraph_node *node;
+    find.key = key;
+    node = RB_FIND(InterGraph, graph, &find);
+    if (!node) {
+        node = calloc(1, sizeof(*node));
+        node->key = key;
+        node->color = R_END;
+        RB_INIT(&node->values);
+        RB_INSERT(InterGraph, graph, node);
+    }
+}
+
 static void InterGraph_add(
         struct InterGraph *graph, uint32_t src, uint32_t dst) {
     struct InterGraph_node find;
@@ -331,8 +345,18 @@ static void InterGraph_add(
         node->key = src;
         node->color = R_END;
         RB_INIT(&node->values);
+        RB_INSERT(InterGraph, graph, node);
     }
     RegSet_add(&node->values, dst);
+}
+
+static uint32_t InterGraph_get_color(struct InterGraph *graph, uint32_t reg) {
+    struct InterGraph_node find;
+    struct InterGraph_node *node;
+    find.key = reg;
+    node = RB_FIND(InterGraph, graph, &find);
+    assert(node != 0);
+    return node->color;
 }
 
 static void InterGraph_clear(struct InterGraph *graph) {
@@ -453,6 +477,7 @@ build_inter_graph(AsmFunc *fn) {
             const int DEF_CNT = (int) countof(use_def.def);
             for (i = 0; i < DEF_CNT && use_def.def[i] != R_END; ++i) {
                 uint32_t x = use_def.def[i];                  /* def(l, x) */
+                InterGraph_ensure(&inter_graph, x);
                 RB_FOREACH(succ, AsmInstrSet, &node->succ) {  /* succ(l, l') */
                     struct AsmInstrInfoMap_node *node_succ =
                         AsmInstrInfoMap_find_or_add(&info_map, succ->elem);
@@ -562,6 +587,17 @@ uint32_t color_regs(struct InterGraph *graph) {
                 node->color++;
         }
 
+        // TODO: why in fixarg.ssa:
+        //
+        //      leaq %.alloc.0, %.1
+        //      leaq %.alloc.8, %.2
+        //      movl $0, %.3
+        //      movq %.1, %r10
+        //      movq %.2, %r11
+        //
+        // %.1 and %.2 both got assigned to %rax?
+        printf(">> reg %d: color=%d\n", node->key, node->color); // TODO
+
         if (node->color > max_used_color)
             max_used_color = node->color;
 
@@ -576,6 +612,7 @@ uint32_t color_regs(struct InterGraph *graph) {
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
     struct InterGraph inter_graph;
     uint32_t max_used_color;  /* R_END + extra_colors_used */
+    int i;
 
     memset(&ctx, 0, sizeof(ctx));
     RB_INIT(&ctx.int_vregs);
@@ -584,14 +621,37 @@ AsmFunc *ra_x64(AsmFunc *in_ptr) {
     inter_graph = build_inter_graph(in_ptr);
     max_used_color = color_regs(&inter_graph);
 
-    // TODO: rewrite all vreg as ALLOC/mreg
-    // TODO: call ra_naive???
-    (void)max_used_color;
+    /* rewrite vreg to mreg or alloc */
+    in_ptr->alloc_sz = (in_ptr->alloc_sz + 7) & ~7;
+    for (i = 0; in_ptr->instr[i].t != A_UNKNOWN; ++i) {
+        AsmInstr *p = &in_ptr->instr[i];
+        int j;
+
+        for (j = 0; j < (int) countof(p->arg_t); ++j) {
+            if (p->arg_t[j] == AP_VREG) {
+                uint32_t color = InterGraph_get_color(
+                        &inter_graph, p->arg[j].vreg.id + R_END);
+                assert(color != R_END);
+                if (color < R_END) {
+                    struct MReg mreg = {0};
+                    mreg.size = p->arg[j].vreg.size;
+                    mreg.mreg = color;
+                    p->arg_t[j] = AP_MREG;
+                    p->arg[j].mreg = mreg;
+                } else {
+                    p->arg_t[j] = AP_ALLOC;
+                    p->arg[j].offset =
+                        in_ptr->alloc_sz + (color - R_END - 1) * 8;
+                }
+            }
+        }
+    }
+    in_ptr->alloc_sz += (max_used_color - R_END) * 8;
 
     InterGraph_clear(&inter_graph);
 
     RegSet_clear(&ctx.int_vregs);
     RegSet_clear(&ctx.sse_vregs);
 
-    return 0;
+    return in_ptr;
 }
