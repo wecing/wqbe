@@ -597,6 +597,7 @@ uint32_t color_regs(struct InterGraph *graph) {
     return max_used_color;
 }
 
+// TODO: also fix e.g. mem-mem add; maybe need a new AsmFunc output obj
 /* remove _dummy_use and _dummy_def, and adjust labels as needed. */
 static void drop_dummy_instrs(AsmFunc *fn) {
     uint32_t ip = 0, new_ip = 0;
@@ -629,7 +630,7 @@ static void drop_dummy_instrs(AsmFunc *fn) {
         label_idx++;
     }
 
-    memset(&fn->label[new_ip], 0, sizeof(fn->label[new_ip]));
+    memset(&fn->instr[new_ip], 0, sizeof(fn->instr[new_ip]));
 }
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {

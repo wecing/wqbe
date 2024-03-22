@@ -855,7 +855,7 @@ static VisitValueResult visit_value(Value v, uint8_t avail_mreg) {
        addq right, %r11
        movq %r11, out
 
-   (that pattern is requires for IMUL anyways, since it cannot output to mem.)
+   (that pattern is required for IMUL anyways, since it cannot output to mem.)
 */
 
 #define arith_wlsd(op,ixop,fxop) \

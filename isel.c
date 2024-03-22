@@ -599,9 +599,7 @@ static void isel_alloc(Instr instr) {
         else \
             EMIT2(MOV, Q, I64(0), VREG(dst)); \
         dst.size = X64_SZ_B; \
-        EMIT2(MOV, xs, ARG(x.t, x.a), MREG(R_R10,xs)); \
-        EMIT2(MOV, xs, ARG(y.t, y.a), MREG(R_R11,xs)); \
-        EMIT2(CMP, xs, MREG(R_R11,xs), MREG(R_R10,xs)); \
+        EMIT2(CMP, xs, ARG(x.t, x.a), ARG(y.t, y.a)); \
         EMIT1(xop, NONE, VREG(dst)); \
     }
 #define cmp_int(op,xop) \
@@ -631,22 +629,20 @@ static void isel_cled(Instr);
             EMIT2(MOV, Q, I64(0), VREG(dst)); \
         dst.size = X64_SZ_B; \
         if (A_##xop == A_SETE || A_##xop == A_SETNE) \
-            EMIT2(MOV, Q, I64(0), MREG(R_R11,Q)); \
-        EMIT2(MOVS, xs, ARG(x.t, x.a), MREG(R_XMM8,xs)); \
-        EMIT2(MOVS, xs, ARG(y.t, y.a), MREG(R_XMM9,xs)); \
+            EMIT2(MOV, Q, I64(0), MREG(R_R10,Q)); \
         if (isel_c##op##s == isel_clts || isel_c##op##s == isel_cles || \
             isel_c##op##s == isel_cltd || isel_c##op##s == isel_cled) { \
-            EMIT2(UCOMIS, xs, MREG(R_XMM8,xs), MREG(R_XMM9,xs)); \
+            EMIT2(UCOMIS, xs, ARG(x.t, x.a), ARG(y.t, y.a)); \
         } else { \
-            EMIT2(UCOMIS, xs, MREG(R_XMM9,xs), MREG(R_XMM8,xs)); \
+            EMIT2(UCOMIS, xs, ARG(y.t, y.a), ARG(x.t, x.a)); \
         } \
         EMIT1(xop, NONE, VREG(dst)); \
         if (A_##xop == A_SETE) { \
-            EMIT1(SETNP, NONE, MREG(R_R11,B)); \
-            EMIT2(AND, B, MREG(R_R11,B), VREG(dst)); \
+            EMIT1(SETNP, NONE, MREG(R_R10,B)); \
+            EMIT2(AND, B, MREG(R_R10,B), VREG(dst)); \
         } else if (A_##xop == A_SETNE) { \
-            EMIT1(SETP, NONE, MREG(R_R11,B)); \
-            EMIT2(OR, B, MREG(R_R11,B), VREG(dst)); \
+            EMIT1(SETP, NONE, MREG(R_R10,B)); \
+            EMIT2(OR, B, MREG(R_R10,B), VREG(dst)); \
         } \
     }
 #define cmp_sse(op,xop) \
