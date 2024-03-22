@@ -455,15 +455,14 @@ build_inter_graph(AsmFunc *fn) {
     for (i = 0; fn->instr[i].t != A_UNKNOWN; ++i) {
         AsmInstr *ip = &fn->instr[i];
         struct AsmInstrInfoMap_node *node;
+        struct AsmInstrSet_node *pred;
+        struct RegSet_node *live;
 
         node = AsmInstrInfoMap_find_or_add(&info_map, ip);
-        if (RB_EMPTY(&node->succ)) {
-            struct AsmInstrSet_node *pred;
-            struct RegSet_node *live;
-            RB_FOREACH(live, RegSet, &node->live) {
-                RB_FOREACH(pred, AsmInstrSet, &node->pred) {
-                    inter_visit(fn, &info_map, pred->elem, live->reg);
-                }
+
+        RB_FOREACH(live, RegSet, &node->live) {
+            RB_FOREACH(pred, AsmInstrSet, &node->pred) {
+                inter_visit(fn, &info_map, pred->elem, live->reg);
             }
         }
     }
@@ -587,17 +586,6 @@ uint32_t color_regs(struct InterGraph *graph) {
                 node->color++;
         }
 
-        // TODO: why in fixarg.ssa:
-        //
-        //      leaq %.alloc.0, %.1
-        //      leaq %.alloc.8, %.2
-        //      movl $0, %.3
-        //      movq %.1, %r10
-        //      movq %.2, %r11
-        //
-        // %.1 and %.2 both got assigned to %rax?
-        printf(">> reg %d: color=%d\n", node->key, node->color); // TODO
-
         if (node->color > max_used_color)
             max_used_color = node->color;
 
@@ -607,6 +595,41 @@ uint32_t color_regs(struct InterGraph *graph) {
     free(regs);
 
     return max_used_color;
+}
+
+/* remove _dummy_use and _dummy_def, and adjust labels as needed. */
+static void drop_dummy_instrs(AsmFunc *fn) {
+    uint32_t ip = 0, new_ip = 0;
+    int label_idx = 0;
+    int del_cnt = 0;
+
+    while (fn->instr[ip].t != A_UNKNOWN) {
+        /* adjust all labels before current instr */
+        while (!Ident_is_empty(fn->label[label_idx].ident) &&
+               fn->label[label_idx].offset < ip) {
+            fn->label[label_idx].offset -= del_cnt;
+            label_idx++;
+        }
+
+        if (fn->instr[ip].t == A__DUMMY_USE ||
+            fn->instr[ip].t == A__DUMMY_DEF) {
+            del_cnt++;
+            ip++;
+        } else {
+            if (new_ip != ip)
+                fn->instr[new_ip] = fn->instr[ip];
+            new_ip++;
+            ip++;
+        }
+    }
+
+    /* adjust labels after the last instr */
+    while (!Ident_is_empty(fn->label[label_idx].ident)) {
+        fn->label[label_idx].offset -= del_cnt;
+        label_idx++;
+    }
+
+    memset(&fn->label[new_ip], 0, sizeof(fn->label[new_ip]));
 }
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
@@ -652,6 +675,8 @@ AsmFunc *ra_x64(AsmFunc *in_ptr) {
 
     RegSet_clear(&ctx.int_vregs);
     RegSet_clear(&ctx.sse_vregs);
+
+    drop_dummy_instrs(in_ptr);
 
     return in_ptr;
 }

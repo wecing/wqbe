@@ -67,7 +67,14 @@ static void x64(FuncDef *fd) {
             dump_x64(af, fd->linkage, stdout);
             printf("\n");
         }
-        // TODO: rest of the pipeline
+
+        af = ra_naive_x64(af, &ir.first_datadef_id);
+        if (dump_debug_info) {
+            printf("####################\n");
+            printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
+            printf("####################\n\n");
+        }
+        dump_x64(af, fd->linkage, fout);
     }
 }
 
