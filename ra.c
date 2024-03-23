@@ -541,8 +541,8 @@ uint32_t color_regs(struct InterGraph *graph) {
         };
         static const uint32_t sse_mregs[] = {
             R_XMM0, R_XMM1, R_XMM2, R_XMM3, R_XMM4, R_XMM5, R_XMM6, R_XMM7,
-            R_XMM8, R_XMM9, R_XMM10, R_XMM11,
-            R_XMM12, R_XMM13, R_XMM14, R_XMM15,
+            R_XMM8, R_XMM9, R_XMM10, R_XMM11, R_XMM12, R_XMM13,
+            /* xmm14/xmm15 reserved for isel */
             R_END
         };
         /* used_colors : ColorSet == Set<uint32_t> == RegSet */
@@ -598,6 +598,7 @@ uint32_t color_regs(struct InterGraph *graph) {
 }
 
 // TODO: also fix e.g. mem-mem add; maybe need a new AsmFunc output obj
+// TODO: fix e.g. idivl $16
 /* remove _dummy_use and _dummy_def, and adjust labels as needed. */
 static void drop_dummy_instrs(AsmFunc *fn) {
     uint32_t ip = 0, new_ip = 0;

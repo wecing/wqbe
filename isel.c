@@ -550,6 +550,133 @@ visit_value(Value v, uint8_t avail_mreg, uint8_t vreg_sz) {
     return r; /* unreachable */
 }
 
+uint8_t get_vreg_sz(Type t) {
+    switch (t.t) {
+    case TP_W: return X64_SZ_L;
+    case TP_L: return X64_SZ_Q;
+    case TP_S: return X64_SZ_S;
+    case TP_D: return X64_SZ_D;
+    default:
+        fail("get_vreg_sz: unsupported type.t: %d", t.t);
+        return 0; /* unreachable */
+    }
+}
+
+#define arith_wlsd(op,ixop,fxop) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
+        VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10, vreg_sz); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_L); \
+            EMIT2(ixop, L, ARG(x.t, x.a), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_Q); \
+            EMIT2(ixop, Q, ARG(x.t, x.a), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_S) { \
+            EMIT2(MOVS, S, ARG(x.t, x.a), VREG(dst)); \
+            /* R10 not used */ \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_S); \
+            EMIT2(fxop, S, ARG(x.t, x.a), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_D) { \
+            EMIT2(MOVS, D, ARG(x.t, x.a), VREG(dst)); \
+            /* R10 not used */ \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_D); \
+            EMIT2(fxop, D, ARG(x.t, x.a), VREG(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+#define arith_wl(op,xop) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
+        VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_R10, vreg_sz); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_L); \
+            EMIT2(xop, L, ARG(x.t, x.a), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_Q); \
+            EMIT2(xop, Q, ARG(x.t, x.a), VREG(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+arith_wlsd(add, ADD, ADDS)
+arith_wlsd(sub, SUB, SUBS)
+arith_wlsd(mul, IMUL, MULS)
+
+arith_wl(or, OR)
+arith_wl(xor, XOR)
+arith_wl(and, AND)
+
+static void isel_div(Instr instr) {
+    uint8_t vreg_sz = get_vreg_sz(instr.ret_t);
+    VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz);
+    VisitValueResult x = visit_value(instr.u.args[0], R_RAX, vreg_sz);
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(MOV, L, ARG(x.t, x.a), EAX);
+        EMIT0(CLTD, NONE);
+        x = visit_value(instr.u.args[1], R_R10, X64_SZ_L);
+        EMIT1(IDIV, L, ARG(x.t, x.a));
+        EMIT2(MOV, L, EAX, VREG(dst));
+    } else if (instr.ret_t.t == TP_L) {
+        EMIT2(MOV, Q, ARG(x.t, x.a), RAX);
+        EMIT0(CQTO, NONE);
+        x = visit_value(instr.u.args[1], R_R10, X64_SZ_Q);
+        EMIT1(IDIV, Q, ARG(x.t, x.a));
+        EMIT2(MOV, Q, RAX, VREG(dst));
+    } else if (instr.ret_t.t == TP_S) {
+        EMIT2(MOVS, S, ARG(x.t, x.a), VREG(dst));
+        x = visit_value(instr.u.args[1], R_R10, X64_SZ_S); /* R10 not used */
+        EMIT2(DIVS, S, ARG(x.t, x.a), VREG(dst));
+    } else if (instr.ret_t.t == TP_D) {
+        EMIT2(MOVS, D, ARG(x.t, x.a), VREG(dst));
+        x = visit_value(instr.u.args[1], R_R10, X64_SZ_D); /* R10 not used */
+        EMIT2(DIVS, D, ARG(x.t, x.a), VREG(dst));
+    } else {
+        fail("unexpected return type");
+    }
+}
+
+#define int_div_rem(op,xop,r) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
+        VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
+        VisitValueResult x = visit_value(instr.u.args[0], R_RAX, vreg_sz); \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), EAX); \
+            if (A_##xop == A_IDIV) \
+                EMIT0(CLTD, NONE); \
+            else \
+                EMIT2(MOV, Q, I64(0), RDX); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_L); \
+            EMIT1(xop, L, ARG(x.t, x.a)); \
+            EMIT2(MOV, L, MREG(r, L), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), RAX); \
+            if (A_##xop == A_IDIV) \
+                EMIT0(CQTO, NONE); \
+            else \
+                EMIT2(MOV, Q, I64(0), RDX); \
+            x = visit_value(instr.u.args[1], R_R10, X64_SZ_Q); \
+            EMIT1(xop, Q, ARG(x.t, x.a)); \
+            EMIT2(MOV, Q, MREG(r, Q), VREG(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+int_div_rem(udiv,DIV,R_RAX)
+int_div_rem(rem,IDIV,R_RDX)
+int_div_rem(urem,DIV,R_RDX)
+
 #define isel_alloc16 isel_alloc
 #define isel_alloc4  isel_alloc
 #define isel_alloc8  isel_alloc
@@ -587,6 +714,68 @@ static void isel_alloc(Instr instr) {
         }
     }
 }
+
+static void isel_load(Instr instr) {
+    (void) instr;
+    fail("unexpected LOAD instruction"); /* parser shouldn't output this */
+}
+
+#define load_mem_simple(op,mv,xs) \
+    static void isel_##op(Instr instr) { \
+        VReg dst = find_or_alloc_tmp(instr.ident, X64_SZ_##xs); \
+        VisitValueResult p = visit_value(instr.u.args[0], R_R10, X64_SZ_Q); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+        EMIT2(mv, xs, MREG_OFF(R_R10, 0), VREG(dst)); \
+    }
+
+load_mem_simple(loadl,  MOV, Q)
+load_mem_simple(loads, MOVS, S)
+load_mem_simple(loadd, MOVS, D)
+
+#define load_mem_bhw(op,xqop,xqsz,xlop,xlsz) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
+        VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
+        VisitValueResult p = visit_value(instr.u.args[0], R_R10, X64_SZ_Q); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+        if (instr.ret_t.t == TP_L) { \
+            EMIT2(xqop, xqsz, MREG_OFF(R_R10, 0), MREG(R_R10, xqsz)); \
+            EMIT2(MOV, Q, MREG(R_R10, Q), VREG(dst)); \
+        } else { \
+            EMIT2(xlop, xlsz, MREG_OFF(R_R10, 0), MREG(R_R10, xlsz)); \
+            EMIT2(MOV, L, MREG(R_R10, L), VREG(dst)); \
+        } \
+    }
+
+load_mem_bhw(loadsw, MOVSL, Q, MOV,   L)
+load_mem_bhw(loaduw, MOV,   L, MOV,   L)
+load_mem_bhw(loadsh, MOVSW, Q, MOVSW, L)
+load_mem_bhw(loaduh, MOVZW, Q, MOVZW, L)
+load_mem_bhw(loadsb, MOVSB, Q, MOVSB, L)
+load_mem_bhw(loadub, MOVZB, Q, MOVZB, L)
+
+#define isel_loadw isel_loadsw
+
+#define store_mem(op,mv,xs,tmp) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = \
+            X64_SZ_##xs == X64_SZ_Q ? X64_SZ_Q \
+            : X64_SZ_##xs == X64_SZ_S ? X64_SZ_S \
+            : X64_SZ_##xs == X64_SZ_D ? X64_SZ_D \
+            : X64_SZ_L; \
+        VisitValueResult v = visit_value(instr.u.args[0], tmp, vreg_sz); \
+        VisitValueResult p = visit_value(instr.u.args[1], R_R10, X64_SZ_Q); \
+        EMIT2(mv, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
+        EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+        EMIT2(mv, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
+    }
+
+store_mem(storeb,  MOV, B, R_R11)
+store_mem(storeh,  MOV, W, R_R11)
+store_mem(storew,  MOV, L, R_R11)
+store_mem(storel,  MOV, Q, R_R11)
+store_mem(stores, MOVS, S, R_XMM14)
+store_mem(stored, MOVS, D, R_XMM14)
 
 #define cmp_int_impl(op,s,xs,xop) \
     static void isel_c##op##s(Instr instr) { \
@@ -764,6 +953,33 @@ static void isel_ret(Instr instr) {
 
 static void isel(Instr instr) {
     switch (instr.t) {
+    case I_ADD: isel_add(instr); return;
+    case I_SUB: isel_sub(instr); return;
+    case I_MUL: isel_mul(instr); return;
+    case I_OR: isel_or(instr); return;
+    case I_XOR: isel_xor(instr); return;
+    case I_AND: isel_and(instr); return;
+    case I_DIV: isel_div(instr); return;
+    case I_UDIV: isel_udiv(instr); return;
+    case I_REM: isel_rem(instr); return;
+    case I_UREM: isel_urem(instr); return;
+    case I_LOAD: isel_load(instr); return;
+    case I_LOADW: isel_loadw(instr); return;
+    case I_LOADL: isel_loadl(instr); return;
+    case I_LOADS: isel_loads(instr); return;
+    case I_LOADD: isel_loadd(instr); return;
+    case I_LOADSW: isel_loadsw(instr); return;
+    case I_LOADUW: isel_loaduw(instr); return;
+    case I_LOADSH: isel_loadsh(instr); return;
+    case I_LOADUH: isel_loaduh(instr); return;
+    case I_LOADSB: isel_loadsb(instr); return;
+    case I_LOADUB: isel_loadub(instr); return;
+    case I_STOREB: isel_storeb(instr); return;
+    case I_STOREH: isel_storeh(instr); return;
+    case I_STOREW: isel_storew(instr); return;
+    case I_STOREL: isel_storel(instr); return;
+    case I_STORES: isel_stores(instr); return;
+    case I_STORED: isel_stored(instr); return;
     case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
