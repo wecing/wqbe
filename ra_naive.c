@@ -258,6 +258,7 @@ static void visit_instr(void) {
         case A_OR:
         case A_SUB:
         case A_SUBS:
+        case A_UCOMIS:
         case A_XOR:
             break;
         default:

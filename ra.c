@@ -598,8 +598,8 @@ uint32_t color_regs(struct InterGraph *graph) {
     return max_used_color;
 }
 
-// TODO: also fix e.g. mem-mem add; maybe need a new AsmFunc output obj
-/* remove _dummy_use and _dummy_def, and adjust labels as needed. */
+/* remove illegal asm instructions and adjust labels as needed. */
+/* NOTE: mem-mem ops are handled in ra_naive.c */
 static void fix_asm_func(const AsmFunc *fn) {
     uint32_t ip = 0, new_ip = 0;
     int label_idx = 0;
@@ -622,8 +622,8 @@ static void fix_asm_func(const AsmFunc *fn) {
             continue;
         }
 
-        if (fn->instr[ip].t == A_IDIV) {
-            /* idiv operand: r/m */
+        if (fn->instr[ip].t == A_IDIV || fn->instr[ip].t == A_DIV) {
+            /* div/idiv operand: r/m */
             if (fn->instr[ip].arg_t[0] == AP_I64) {
                 AsmInstr *mov = &out->instr[new_ip];
                 AsmInstr *idiv = &out->instr[new_ip+1];
