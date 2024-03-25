@@ -624,6 +624,8 @@ static void fix_asm_func(const AsmFunc *fn) {
 
         if (fn->instr[ip].t == A_IDIV || fn->instr[ip].t == A_DIV) {
             /* div/idiv operand: r/m */
+            /* note: ra_naive converts imm64 to mem64 if value is too big, which
+               essentially rewrites the op to the legal `div/idiv m`. */
             if (fn->instr[ip].arg_t[0] == AP_I64) {
                 AsmInstr *mov = &out->instr[new_ip];
                 AsmInstr *idiv = &out->instr[new_ip+1];
@@ -652,6 +654,8 @@ static void fix_asm_func(const AsmFunc *fn) {
                 continue;
             }
         }
+
+        // TODO: cmpl %rax, $1
 
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];

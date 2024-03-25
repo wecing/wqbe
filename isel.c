@@ -59,6 +59,18 @@ static VReg find_or_alloc_tmp(Ident ident, uint8_t sz) {
     return vreg;
 }
 
+uint8_t get_vreg_sz(Type t) {
+    switch (t.t) {
+    case TP_W: return X64_SZ_L;
+    case TP_L: return X64_SZ_Q;
+    case TP_S: return X64_SZ_S;
+    case TP_D: return X64_SZ_D;
+    default:
+        fail("get_vreg_sz: unsupported type.t: %d", t.t);
+        return 0; /* unreachable */
+    }
+}
+
 #define MREG(r,sz) AP_MREG, .mreg=mreg(X64_SZ_##sz,r,0,0)
 #define RAX MREG(R_RAX,Q)
 #define RSP MREG(R_RSP,Q)
@@ -406,7 +418,9 @@ static void emit_prologue(void) {
         /* aggregate: IR values are actually addresses */
         vreg = find_or_alloc_tmp(
             ctx.fd.params[i].ident,
-            ctx.fd.params[i].t.t == TP_AG ? X64_SZ_Q : ctx.fd.params[i].t.t);
+            ctx.fd.params[i].t.t == TP_AG
+            ? X64_SZ_Q
+            : get_vreg_sz(ctx.fd.params[i].t));
 
         if (!use_stack) { /* use regs */
             if (tp_align >= 16 && (asm_func.alloc_sz & (tp_align-1)))
@@ -548,18 +562,6 @@ visit_value(Value v, uint8_t avail_mreg, uint8_t vreg_sz) {
     }
     fail("unrecognized VALUE type");
     return r; /* unreachable */
-}
-
-uint8_t get_vreg_sz(Type t) {
-    switch (t.t) {
-    case TP_W: return X64_SZ_L;
-    case TP_L: return X64_SZ_Q;
-    case TP_S: return X64_SZ_S;
-    case TP_D: return X64_SZ_D;
-    default:
-        fail("get_vreg_sz: unsupported type.t: %d", t.t);
-        return 0; /* unreachable */
-    }
 }
 
 #define arith_wlsd(op,ixop,fxop) \
@@ -793,7 +795,7 @@ store_mem(stored, MOVS, D, R_XMM14)
         else \
             EMIT2(MOV, Q, I64(0), VREG(dst)); \
         dst.size = X64_SZ_B; \
-        EMIT2(CMP, xs, ARG(x.t, x.a), ARG(y.t, y.a)); \
+        EMIT2(CMP, xs, ARG(y.t, y.a), ARG(x.t, x.a)); \
         EMIT1(xop, NONE, VREG(dst)); \
     }
 #define cmp_int(op,xop) \
@@ -862,6 +864,56 @@ cmp_sse(ge, SETAE)
 cmp_sse(gt, SETA)
 cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
+
+static void isel_copy(Instr instr) {
+    uint8_t vreg_sz =
+        instr.ret_t.t == TP_AG ? X64_SZ_Q : get_vreg_sz(instr.ret_t);
+    VisitValueResult vvr = visit_value(instr.u.args[0], R_R10, vreg_sz);
+    if (instr.ret_t.t == TP_AG) {
+        uint32_t tp_sz = Type_size(instr.ret_t);
+        /* output of copy op */
+        EMIT2(LEA, Q, ALLOC(asm_func.alloc_sz),
+              VREG(find_or_alloc_tmp(instr.ident, X64_SZ_Q)));
+        /* actual coping */
+        EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+        blit(MREG_OFF(R_R10, 0), ALLOC(asm_func.alloc_sz), tp_sz);
+        asm_func.alloc_sz = (asm_func.alloc_sz + tp_sz + 7) & ~7;
+    } else {
+        VReg d = find_or_alloc_tmp(instr.ident, vreg_sz);
+        switch (instr.ret_t.t) {
+        case TP_W: EMIT2(MOV, L, ARG(vvr.t, vvr.a), VREG(d)); break;
+        case TP_L: EMIT2(MOV, Q, ARG(vvr.t, vvr.a), VREG(d)); break;
+        case TP_S: EMIT2(MOVS, S, ARG(vvr.t, vvr.a), VREG(d)); break;
+        case TP_D: EMIT2(MOVS, D, ARG(vvr.t, vvr.a), VREG(d)); break;
+        default:
+            fail("unexpected copy type");
+        }
+    }
+}
+
+static void isel_phi(Instr instr) {
+    (void)instr;
+    fail("unexpected phi op");
+}
+
+static void isel_hlt(Instr instr) {
+    (void)instr;
+    EMIT0(UD2, NONE);
+}
+
+static void isel_jmp(Instr instr) {
+    EMIT1(JMP, NONE, SYM(instr.u.jump.dst));
+}
+
+static void isel_jnz(Instr instr) {
+    /* QBE requires cond to be of i32 type;
+       i64 is also allowed but higher 32 bits are discarded. */
+    VisitValueResult vvr;
+    vvr = visit_value(instr.u.jump.v, R_R11, X64_SZ_L);
+    EMIT2(CMP, L, I64(0), ARG(vvr.t, vvr.a));
+    EMIT1(JNE, NONE, SYM(instr.u.jump.dst));
+    EMIT1(JMP, NONE, SYM(instr.u.jump.dst_else));
+}
 
 static void isel_ret(Instr instr) {
     int used_int_regs = 0, used_sse_regs = 0;
@@ -1024,6 +1076,11 @@ static void isel(Instr instr) {
     case I_CULTW: isel_cultw(instr); return;
     case I_CUOD: isel_cuod(instr); return;
     case I_CUOS: isel_cuos(instr); return;
+    case I_COPY: isel_copy(instr); return;
+    case I_PHI: isel_phi(instr); return;
+    case I_HLT: isel_hlt(instr); return;
+    case I_JMP: isel_jmp(instr); return;
+    case I_JNZ: isel_jnz(instr); return;
     case I_RET: isel_ret(instr); return;
     }
     fail("unrecognized instr type %d", instr.t);
