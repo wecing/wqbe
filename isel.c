@@ -765,9 +765,14 @@ load_mem_bhw(loadub, MOVZB, Q, MOVZB, L)
             : X64_SZ_L; \
         VisitValueResult v = visit_value(instr.u.args[0], tmp, vreg_sz); \
         VisitValueResult p = visit_value(instr.u.args[1], R_R10, X64_SZ_Q); \
-        EMIT2(mv, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
-        EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
-        EMIT2(mv, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
+        if (X64_SZ_##xs == X64_SZ_Q) { \
+            EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+            EMIT2(MOV, Q, ARG(v.t, v.a), MREG_OFF(R_R10, 0)); \
+        } else { \
+            EMIT2(mv, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
+            EMIT2(MOV, Q, ARG(p.t, p.a), R10); \
+            EMIT2(mv, xs, MREG(tmp, xs), MREG_OFF(R_R10, 0)); \
+        } \
     }
 
 store_mem(storeb,  MOV, B, R_R11)
