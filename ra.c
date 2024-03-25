@@ -48,6 +48,7 @@ static void RegSet_clear(struct RegSet *set) {
 static struct {
     struct RegSet int_vregs;
     struct RegSet sse_vregs;
+    AsmFunc out;
 } ctx;
 
 typedef struct UseDef {
@@ -598,18 +599,19 @@ uint32_t color_regs(struct InterGraph *graph) {
 }
 
 // TODO: also fix e.g. mem-mem add; maybe need a new AsmFunc output obj
-// TODO: fix e.g. idivl $16
 /* remove _dummy_use and _dummy_def, and adjust labels as needed. */
-static void drop_dummy_instrs(AsmFunc *fn) {
+static void fix_asm_func(const AsmFunc *fn) {
     uint32_t ip = 0, new_ip = 0;
     int label_idx = 0;
     int del_cnt = 0;
+    AsmFunc *out = &ctx.out;
 
     while (fn->instr[ip].t != A_UNKNOWN) {
         /* adjust all labels before current instr */
         while (!Ident_is_empty(fn->label[label_idx].ident) &&
                fn->label[label_idx].offset < ip) {
-            fn->label[label_idx].offset -= del_cnt;
+            out->label[label_idx] = fn->label[label_idx];
+            out->label[label_idx].offset -= del_cnt;
             label_idx++;
         }
 
@@ -617,21 +619,55 @@ static void drop_dummy_instrs(AsmFunc *fn) {
             fn->instr[ip].t == A__DUMMY_DEF) {
             del_cnt++;
             ip++;
-        } else {
-            if (new_ip != ip)
-                fn->instr[new_ip] = fn->instr[ip];
-            new_ip++;
-            ip++;
+            continue;
         }
+
+        if (fn->instr[ip].t == A_IDIV) {
+            /* idiv operand: r/m */
+            if (fn->instr[ip].arg_t[0] == AP_I64) {
+                AsmInstr *mov = &out->instr[new_ip];
+                AsmInstr *idiv = &out->instr[new_ip+1];
+                struct MReg r11 = {0};
+
+                assert(new_ip + 2 < countof(out->instr));
+                *mov = fn->instr[ip];
+                *idiv = fn->instr[ip];
+
+                r11.size = X64_SZ_Q;
+                r11.mreg = R_R11;
+
+                /* movq $n, %r11 */
+                mov->t = A_MOV;
+                mov->size = X64_SZ_Q;
+                mov->arg_t[1] = AP_MREG;
+                mov->arg[1].mreg = r11;
+
+                /* idivX %r11 */
+                idiv->arg_t[0] = AP_MREG;
+                idiv->arg[0].mreg = r11;
+                idiv->arg[0].mreg.size = idiv->size;
+
+                ip++;
+                new_ip += 2;
+                continue;
+            }
+        }
+
+        /* default: simply copy op */
+        out->instr[new_ip] = fn->instr[ip];
+        new_ip++;
+        ip++;
+        assert(new_ip < countof(out->instr));
     }
 
     /* adjust labels after the last instr */
     while (!Ident_is_empty(fn->label[label_idx].ident)) {
-        fn->label[label_idx].offset -= del_cnt;
+        out->label[label_idx] = fn->label[label_idx];
+        out->label[label_idx].offset -= del_cnt;
         label_idx++;
     }
 
-    memset(&fn->instr[new_ip], 0, sizeof(fn->instr[new_ip]));
+    memset(&out->instr[new_ip], 0, sizeof(out->instr[new_ip]));
 }
 
 AsmFunc *ra_x64(AsmFunc *in_ptr) {
@@ -678,7 +714,10 @@ AsmFunc *ra_x64(AsmFunc *in_ptr) {
     RegSet_clear(&ctx.int_vregs);
     RegSet_clear(&ctx.sse_vregs);
 
-    drop_dummy_instrs(in_ptr);
+    fix_asm_func(in_ptr);
+    ctx.out.stk_arg_sz = in_ptr->stk_arg_sz;
+    ctx.out.alloc_sz = in_ptr->alloc_sz;
+    ctx.out.has_dyn_alloc = in_ptr->has_dyn_alloc;
 
-    return in_ptr;
+    return &ctx.out;
 }
