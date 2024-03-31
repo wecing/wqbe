@@ -275,18 +275,18 @@ static void visit_instr(void) {
               subl %r11d, 8(%rsp)
 
            movss -16(%rbp), 8(%rsp)
-           => movss -16(%rbp), %xmm8
-              movss %xmm8, 8(%rsp)
+           => movss -16(%rbp), %xmm15
+              movss %xmm15, 8(%rsp)
 
            subsd $.fp0(%rip), -12(%rbp)
-           => movsd $.fp0(%rip), %xmm8
-              subsd %xmm8, -12(%rbp) */
+           => movsd $.fp0(%rip), %xmm15
+              subsd %xmm15, -12(%rbp) */
         tmp.mreg.size = in.size;
-        tmp.mreg.mreg = (in.size == SZ_S || in.size == SZ_D) ? R_XMM8 : R_R11;
+        tmp.mreg.mreg = (in.size == SZ_S || in.size == SZ_D) ? R_XMM15 : R_R11;
         emit_instr(in);
         if (in.t != A_LEA)
             OUT.instr[O_IP - 1].t =
-                tmp.mreg.mreg == R_XMM8 ? A_MOVS : A_MOV;
+                tmp.mreg.mreg == R_XMM15 ? A_MOVS : A_MOV;
         OUT.instr[O_IP - 1].arg_t[1] = AP_MREG;
         OUT.instr[O_IP - 1].arg[1] = tmp;
         emit_instr(in);
