@@ -598,12 +598,19 @@ uint32_t color_regs(struct InterGraph *graph) {
     return max_used_color;
 }
 
+static struct MReg mreg(int size, int mreg) {
+    struct MReg r = {0};
+    r.size = size;
+    r.mreg = mreg;
+    return r;
+}
+
 /* remove illegal asm instructions and adjust labels as needed. */
 /* NOTE: mem-mem ops are handled in ra_naive.c */
 static void fix_asm_func(const AsmFunc *fn) {
     uint32_t ip = 0, new_ip = 0;
     int label_idx = 0;
-    int del_cnt = 0;
+    int out_offset_delta = 0;
     AsmFunc *out = &ctx.out;
 
     while (fn->instr[ip].t != A_UNKNOWN) {
@@ -611,51 +618,78 @@ static void fix_asm_func(const AsmFunc *fn) {
         while (!Ident_is_empty(fn->label[label_idx].ident) &&
                fn->label[label_idx].offset < ip) {
             out->label[label_idx] = fn->label[label_idx];
-            out->label[label_idx].offset -= del_cnt;
+            out->label[label_idx].offset += out_offset_delta;
             label_idx++;
         }
 
         if (fn->instr[ip].t == A__DUMMY_USE ||
             fn->instr[ip].t == A__DUMMY_DEF) {
-            del_cnt++;
+            out_offset_delta--;
             ip++;
             continue;
         }
 
-        if (fn->instr[ip].t == A_IDIV || fn->instr[ip].t == A_DIV) {
+        if (fn->instr[ip].arg_t[0] == AP_I64) {
             /* div/idiv operand: r/m */
             /* note: ra_naive converts imm64 to mem64 if value is too big, which
                essentially rewrites the op to the legal `div/idiv m`. */
-            if (fn->instr[ip].arg_t[0] == AP_I64) {
+            if (fn->instr[ip].t == A_IDIV || fn->instr[ip].t == A_DIV) {
                 AsmInstr *mov = &out->instr[new_ip];
                 AsmInstr *idiv = &out->instr[new_ip+1];
-                struct MReg r11 = {0};
+                struct MReg r11 = mreg(X64_SZ_Q, R_R11);
 
                 assert(new_ip + 2 < countof(out->instr));
                 *mov = fn->instr[ip];
                 *idiv = fn->instr[ip];
 
-                r11.size = X64_SZ_Q;
-                r11.mreg = R_R11;
-
-                /* movq $n, %r11 */
+                /* idivX $n => movq $n, %r11 */
                 mov->t = A_MOV;
                 mov->size = X64_SZ_Q;
                 mov->arg_t[1] = AP_MREG;
                 mov->arg[1].mreg = r11;
 
-                /* idivX %r11 */
+                /* idivX $n => idivX %r11 */
                 idiv->arg_t[0] = AP_MREG;
                 idiv->arg[0].mreg = r11;
                 idiv->arg[0].mreg.size = idiv->size;
 
                 ip++;
                 new_ip += 2;
+                out_offset_delta++;
                 continue;
             }
         }
 
-        // TODO: cmpl %rax, $1
+        if (fn->instr[ip].arg_t[1] == AP_I64) {
+            /* cmpl %eax, $1
+               => movl $1, %r11d
+                  cmpl %eax, %r11d */
+            if (fn->instr[ip].t == A_CMP) {
+                AsmInstr *mov = &out->instr[new_ip];
+                AsmInstr *cmp = &out->instr[new_ip+1];
+                struct MReg r11 = mreg(fn->instr[ip].size, R_R11);
+
+                assert(new_ip + 2 < countof(out->instr));
+                *mov = fn->instr[ip];
+                *cmp = fn->instr[ip];
+
+                /* cmpl %eax, $1 => movl $1, %r11d */
+                mov->t = A_MOV;
+                mov->arg_t[0] = mov->arg_t[1];
+                mov->arg[0] = mov->arg[1];
+                mov->arg_t[1] = AP_MREG;
+                mov->arg[1].mreg = r11;
+
+                /* cmpl %eax, $1 => cmpl $eax, %r11d */
+                cmp->arg_t[1] = AP_MREG;
+                cmp->arg[1].mreg = r11;
+
+                ip++;
+                new_ip += 2;
+                out_offset_delta++;
+                continue;
+            }
+        }
 
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];
@@ -667,7 +701,7 @@ static void fix_asm_func(const AsmFunc *fn) {
     /* adjust labels after the last instr */
     while (!Ident_is_empty(fn->label[label_idx].ident)) {
         out->label[label_idx] = fn->label[label_idx];
-        out->label[label_idx].offset -= del_cnt;
+        out->label[label_idx].offset += out_offset_delta;
         label_idx++;
     }
 
