@@ -85,12 +85,11 @@ uint8_t get_vreg_sz(Type t) {
 #define R11 MREG(R_R11,Q)
 #define XMM0 MREG(R_XMM0,D)
 #define XMM1 MREG(R_XMM1,D)
-#define XMM8 MREG(R_XMM8,D)
-#define XMM9 MREG(R_XMM9,D)
+#define XMM14 MREG(R_XMM14,D)
 #define EAX MREG(R_RAX,L)
 #define EDX MREG(R_RDX,L)
 #define ECX MREG(R_RCX,L)
-#define R11D MREG(R_R11,L)
+#define R10D MREG(R_R10,L)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
@@ -717,6 +716,14 @@ static void isel_alloc(Instr instr) {
     }
 }
 
+static void isel_blit(Instr instr) {
+    VisitValueResult src = visit_value(instr.u.args[0], R_R10, X64_SZ_Q);
+    VisitValueResult dst = visit_value(instr.u.args[1], R_RAX, X64_SZ_Q);
+    EMIT2(MOV, Q, ARG(src.t, src.a), R10);
+    EMIT2(MOV, Q, ARG(dst.t, dst.a), RAX);
+    blit(MREG_OFF(R_R10, 0), MREG_OFF(R_RAX, 0), instr.blit_sz);
+}
+
 static void isel_load(Instr instr) {
     (void) instr;
     fail("unexpected LOAD instruction"); /* parser shouldn't output this */
@@ -865,6 +872,37 @@ cmp_sse(gt, SETA)
 cmp_sse(o, SETNP)
 cmp_sse(uo, SETP)
 
+static void isel_cast(Instr instr) {
+    uint8_t vreg_sz = get_vreg_sz(instr.ret_t);
+    VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz);
+    VisitValueResult v;
+    switch (instr.ret_t.t) {
+    case TP_W: /* f32 => i32 */
+        v = visit_value(instr.u.args[0], R_R10, X64_SZ_S);
+        EMIT2(MOVS, S, ARG(v.t, v.a), XMM14);
+        EMIT2(MOVQ, NONE, XMM14, VREG(dst));
+        return;
+    case TP_L: /* f64 => i64 */
+        v = visit_value(instr.u.args[0], R_R10, X64_SZ_D);
+        EMIT2(MOVS, D, ARG(v.t, v.a), XMM14);
+        EMIT2(MOVQ, NONE, XMM14, VREG(dst));
+        return;
+    case TP_S: /* i32 => f32 */
+        v = visit_value(instr.u.args[0], R_R10, X64_SZ_W);
+        EMIT2(MOV, L, ARG(v.t, v.a), R10D);
+        EMIT2(MOVQ, NONE, R10, XMM14);
+        EMIT2(MOVS, D, XMM14, VREG(dst));
+        return;
+    case TP_D: /* i64 => f64 */
+        v = visit_value(instr.u.args[0], R_R10, X64_SZ_L);
+        EMIT2(MOV, Q, ARG(v.t, v.a), R10);
+        EMIT2(MOVQ, NONE, R10, XMM14);
+        EMIT2(MOVS, D, XMM14, VREG(dst));
+        return;
+    }
+    fail("illegal cast op argument");
+}
+
 static void isel_copy(Instr instr) {
     uint8_t vreg_sz =
         instr.ret_t.t == TP_AG ? X64_SZ_Q : get_vreg_sz(instr.ret_t);
@@ -1008,38 +1046,22 @@ static void isel_ret(Instr instr) {
     EMIT0(RET, NONE);
 }
 
+static void isel_dbgloc(Instr instr) {
+    EMIT2(_AS_LOC, NONE,
+          I64(instr.u.args[0].u.u64),
+          I64(instr.u.args[1].t == V_CI ? instr.u.args[1].u.u64 : -1));
+}
+
 static void isel(Instr instr) {
     switch (instr.t) {
     case I_ADD: isel_add(instr); return;
-    case I_SUB: isel_sub(instr); return;
-    case I_MUL: isel_mul(instr); return;
-    case I_OR: isel_or(instr); return;
-    case I_XOR: isel_xor(instr); return;
-    case I_AND: isel_and(instr); return;
-    case I_DIV: isel_div(instr); return;
-    case I_UDIV: isel_udiv(instr); return;
-    case I_REM: isel_rem(instr); return;
-    case I_UREM: isel_urem(instr); return;
-    case I_LOAD: isel_load(instr); return;
-    case I_LOADW: isel_loadw(instr); return;
-    case I_LOADL: isel_loadl(instr); return;
-    case I_LOADS: isel_loads(instr); return;
-    case I_LOADD: isel_loadd(instr); return;
-    case I_LOADSW: isel_loadsw(instr); return;
-    case I_LOADUW: isel_loaduw(instr); return;
-    case I_LOADSH: isel_loadsh(instr); return;
-    case I_LOADUH: isel_loaduh(instr); return;
-    case I_LOADSB: isel_loadsb(instr); return;
-    case I_LOADUB: isel_loadub(instr); return;
-    case I_STOREB: isel_storeb(instr); return;
-    case I_STOREH: isel_storeh(instr); return;
-    case I_STOREW: isel_storew(instr); return;
-    case I_STOREL: isel_storel(instr); return;
-    case I_STORES: isel_stores(instr); return;
-    case I_STORED: isel_stored(instr); return;
     case I_ALLOC16: isel_alloc16(instr); return;
     case I_ALLOC4: isel_alloc4(instr); return;
     case I_ALLOC8: isel_alloc8(instr); return;
+    case I_AND: isel_and(instr); return;
+    case I_BLIT: isel_blit(instr); return;
+    // TODO: call
+    case I_CAST: isel_cast(instr); return;
     case I_CEQD: isel_ceqd(instr); return;
     case I_CEQL: isel_ceql(instr); return;
     case I_CEQS: isel_ceqs(instr); return;
@@ -1057,6 +1079,7 @@ static void isel(Instr instr) {
     case I_CNES: isel_cnes(instr); return;
     case I_CNEW: isel_cnew(instr); return;
     case I_COD: isel_cod(instr); return;
+    case I_COPY: isel_copy(instr); return;
     case I_COS: isel_cos(instr); return;
     case I_CSGEL: isel_csgel(instr); return;
     case I_CSGEW: isel_csgew(instr); return;
@@ -1076,12 +1099,54 @@ static void isel(Instr instr) {
     case I_CULTW: isel_cultw(instr); return;
     case I_CUOD: isel_cuod(instr); return;
     case I_CUOS: isel_cuos(instr); return;
-    case I_COPY: isel_copy(instr); return;
-    case I_PHI: isel_phi(instr); return;
+    case I_DBGLOC: isel_dbgloc(instr); return;
+    case I_DIV: isel_div(instr); return;
+    // TODO: dtosi
+    // TODO: dtoui
+    // TODO: exts
+    // TODO: ext{s,u}{b,h,w}
     case I_HLT: isel_hlt(instr); return;
     case I_JMP: isel_jmp(instr); return;
     case I_JNZ: isel_jnz(instr); return;
+    case I_LOAD: isel_load(instr); return;
+    case I_LOADD: isel_loadd(instr); return;
+    case I_LOADL: isel_loadl(instr); return;
+    case I_LOADS: isel_loads(instr); return;
+    case I_LOADSB: isel_loadsb(instr); return;
+    case I_LOADSH: isel_loadsh(instr); return;
+    case I_LOADSW: isel_loadsw(instr); return;
+    case I_LOADUB: isel_loadub(instr); return;
+    case I_LOADUH: isel_loaduh(instr); return;
+    case I_LOADUW: isel_loaduw(instr); return;
+    case I_LOADW: isel_loadw(instr); return;
+    case I_MUL: isel_mul(instr); return;
+    // TODO: neg
+    case I_OR: isel_or(instr); return;
+    case I_PHI: isel_phi(instr); return;
+    case I_REM: isel_rem(instr); return;
     case I_RET: isel_ret(instr); return;
+    // TODO: sar
+    // TODO: shl
+    // TODO: shr
+    // TODO: sltof
+    case I_STOREB: isel_storeb(instr); return;
+    case I_STORED: isel_stored(instr); return;
+    case I_STOREH: isel_storeh(instr); return;
+    case I_STOREL: isel_storel(instr); return;
+    case I_STORES: isel_stores(instr); return;
+    case I_STOREW: isel_storew(instr); return;
+    // TODO: stosi
+    // TODO: stoui
+    case I_SUB: isel_sub(instr); return;
+    // TODO: swtof
+    // TODO: truncd
+    case I_UDIV: isel_udiv(instr); return;
+    // TODO: ultof
+    case I_UREM: isel_urem(instr); return;
+    // TODO: uwtof
+    // TODO: vaarg
+    // TODO: vastart
+    case I_XOR: isel_xor(instr); return;
     }
     fail("unrecognized instr type %d", instr.t);
 }
