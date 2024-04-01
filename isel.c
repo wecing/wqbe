@@ -521,7 +521,7 @@ static Ident visit_value_unique_ident(void) {
     return Ident_from_str(buf);
 }
 
-/* NOTE: %rax should not be alive on calling this
+/* NOTE: %rax should not be pre-colored and alive on calling this
    (using %rax so it's more likely to be reused by reg alloc) */
 static VisitValueResult
 visit_value(Value v, uint8_t vreg_sz) {
