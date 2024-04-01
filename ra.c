@@ -629,6 +629,7 @@ static void fix_asm_func(const AsmFunc *fn) {
             continue;
         }
 
+        // TODO: handle this in isel
         if (fn->instr[ip].arg_t[0] == AP_I64) {
             /* div/idiv operand: r/m */
             /* note: ra_naive converts imm64 to mem64 if value is too big, which
@@ -660,6 +661,7 @@ static void fix_asm_func(const AsmFunc *fn) {
             }
         }
 
+        // TODO: handle this in isel
         if (fn->instr[ip].arg_t[1] == AP_I64) {
             /* cmpl %eax, $1
                => movl $1, %r11d
