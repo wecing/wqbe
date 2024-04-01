@@ -563,6 +563,21 @@ visit_value(Value v, uint8_t vreg_sz) {
     return r; /* unreachable */
 }
 
+/* avoid expressions like `divl $42`; introduces a new vreg for the imm.
+   no need to handle imm64/fp since they will be converted to mem in ra_naive */
+static VisitValueResult
+visit_value_avoid_imm32(VisitValueResult v, uint8_t vreg_sz) {
+    if (v.t == AP_I64 && !(v.a.i64 & ~0x7FFFFFFFL)) {
+        VisitValueResult r;
+        r.t = AP_VREG;
+        r.a.vreg = find_or_alloc_tmp(visit_value_unique_ident(), vreg_sz);
+        EMIT2(MOV, NONE, I64(v.a.i64), VREG(r.a.vreg));
+        LAST_INSTR.size = vreg_sz;
+        return r;
+    }
+    return v;
+}
+
 #define arith_wlsd(op,ixop,fxop) \
     static void isel_##op(Instr instr) { \
         uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
@@ -616,6 +631,7 @@ static void isel_div(Instr instr) {
     VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz);
     VisitValueResult y = visit_value(instr.u.args[1], vreg_sz);
     VisitValueResult x = visit_value(instr.u.args[0], vreg_sz);
+    y = visit_value_avoid_imm32(y, vreg_sz);
     if (instr.ret_t.t == TP_W) {
         EMIT2(MOV, L, ARG(x.t, x.a), EAX);
         EMIT0(CLTD, NONE);
@@ -643,6 +659,7 @@ static void isel_div(Instr instr) {
         VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
         VisitValueResult y = visit_value(instr.u.args[1], vreg_sz); \
         VisitValueResult x = visit_value(instr.u.args[0], vreg_sz); \
+        y = visit_value_avoid_imm32(y, vreg_sz); \
         if (instr.ret_t.t == TP_W) { \
             EMIT2(MOV, L, ARG(x.t, x.a), EAX); \
             if (A_##xop == A_IDIV) \
@@ -786,6 +803,7 @@ store_mem(stored, MOVS, D, R_XMM0)
             instr.ident, instr.ret_t.t == TP_W ? X64_SZ_L : X64_SZ_Q); \
         VisitValueResult x = visit_value(instr.u.args[0], X64_SZ_##xs); \
         VisitValueResult y = visit_value(instr.u.args[1], X64_SZ_##xs); \
+        x = visit_value_avoid_imm32(x, X64_SZ_##xs); \
         if (instr.ret_t.t == TP_W) \
             EMIT2(MOV, L, I64(0), VREG(dst)); \
         else \
@@ -932,8 +950,8 @@ static void isel_jmp(Instr instr) {
 static void isel_jnz(Instr instr) {
     /* QBE requires cond to be of i32 type;
        i64 is also allowed but higher 32 bits are discarded. */
-    VisitValueResult vvr;
-    vvr = visit_value(instr.u.jump.v, X64_SZ_L);
+    VisitValueResult vvr = visit_value(instr.u.jump.v, X64_SZ_L);
+    vvr = visit_value_avoid_imm32(vvr, X64_SZ_L);
     EMIT2(CMP, L, I64(0), ARG(vvr.t, vvr.a));
     EMIT1(JNE, NONE, SYM(instr.u.jump.dst));
     EMIT1(JMP, NONE, SYM(instr.u.jump.dst_else));
