@@ -140,9 +140,8 @@ static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
         r.use[0] = R_RAX;
         break;
     case A_CALL:
-        /* TODO: DEF unused regs, USE all regs, DEF ret regs */
-        (void)fn;
-        fail("ra.c: A_CALL not implemented");
+        /* nothing to do -- we rely on dummy USE/DEF marker */
+        (void)fn; // TODO
         break;
     case A_RET:
         /* nothing to do -- we rely on dummy USE marker */
