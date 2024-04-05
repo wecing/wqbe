@@ -78,7 +78,7 @@ get_reg_id(uint8_t arg_t, union AsmInstrArg arg, enum GetRegIdFlag flag) {
     }
 }
 
-static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
+static UseDef get_use_def(AsmInstr *ip) {
     UseDef r = { {R_END, R_END}, {R_END, R_END, R_END} };
     switch (ip->t) {
     case A_MOV: case A_MOVQ: case A_MOVS:
@@ -140,11 +140,8 @@ static UseDef get_use_def(AsmFunc *fn, AsmInstr *ip) {
         r.use[0] = R_RAX;
         break;
     case A_CALL:
-        /* nothing to do -- we rely on dummy USE/DEF marker */
-        (void)fn; // TODO
-        break;
     case A_RET:
-        /* nothing to do -- we rely on dummy USE marker */
+        /* nothing to do -- we rely on dummy USE/DEF marker */
         break;
     case A_JE: case A_JL: case A_JMP: case A_JNE:
     case A_UD2: case A__AS_LOC:
@@ -381,9 +378,9 @@ static void record_edge(
     AsmInstrSet_add(&map_node->pred, start);
 }
 
-static int has_def(AsmFunc *fn, AsmInstr *ip, uint32_t reg) {
+static int has_def(AsmInstr *ip, uint32_t reg) {
     int i;
-    UseDef use_def = get_use_def(fn, ip);
+    UseDef use_def = get_use_def(ip);
     const int DEF_CNT = (int) countof(use_def.def);
     for (i = 0; i < DEF_CNT && use_def.def[i] != R_END; ++i)
         if (use_def.def[i] == reg)
@@ -408,7 +405,7 @@ static void inter_visit(
     /* already live: end backtracking */
     if (AsmInstrInfoMap_is_live(map, ip, reg)) return;
     /* not live here: end backtracking */
-    if (has_def(fn, ip, reg)) return;
+    if (has_def(ip, reg)) return;
 
     AsmInstrInfoMap_mark_live(map, ip, reg);
 
@@ -439,7 +436,7 @@ build_inter_graph(AsmFunc *fn) {
         const int USE_CNT = (int) countof(use_def.use);
         int j;
 
-        use_def = get_use_def(fn, ip);
+        use_def = get_use_def(ip);
         for (j = 0; j < USE_CNT && use_def.use[j] != R_END; ++j) {
             AsmInstrInfoMap_mark_live(&info_map, ip, use_def.use[j]);
         }
@@ -472,7 +469,7 @@ build_inter_graph(AsmFunc *fn) {
         struct AsmInstrInfoMap_node *node;
         struct AsmInstrSet_node *succ;
         RB_FOREACH(node, AsmInstrInfoMap, &info_map) {
-            UseDef use_def = get_use_def(fn, node->key);
+            UseDef use_def = get_use_def(node->key);
             const int DEF_CNT = (int) countof(use_def.def);
             for (i = 0; i < DEF_CNT && use_def.def[i] != R_END; ++i) {
                 uint32_t x = use_def.def[i];                  /* def(l, x) */
