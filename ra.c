@@ -618,6 +618,44 @@ static void fix_asm_func(const AsmFunc *fn) {
             continue;
         }
 
+        if (fn->instr[ip].t == A_UCOMIS) {
+            /* ucomis xmm/m64, xmm */
+            /* QBE allows representing f32/f64 literals as u64 blob;
+               ra_naive converts i64/f32/f64 to mem */
+            if (fn->instr[ip].arg_t[1] == AP_I64
+                || fn->instr[ip].arg_t[1] == AP_F32
+                || fn->instr[ip].arg_t[1] == AP_F64
+                || (fn->instr[ip].arg_t[1] == AP_MREG
+                    && fn->instr[ip].arg[1].mreg.is_deref)) {
+                AsmInstr *mov = &out->instr[new_ip];
+                AsmInstr *cmp = &out->instr[new_ip+1];
+                struct MReg xmm15 = {0};
+
+                assert(new_ip+2 < countof(out->instr));
+                xmm15.size = fn->instr[ip].size;
+                xmm15.mreg = R_XMM15;
+
+                /* ucomisX a, m => movsX m, %xmm15 */
+                *mov = fn->instr[ip];
+                mov->t = A_MOVS;
+                mov->arg_t[0] = mov->arg_t[1];
+                mov->arg[0] = mov->arg[1];
+                mov->arg_t[1] = AP_MREG;
+                mov->arg[1].mreg = xmm15;
+
+                /* ucomisX a, m => ucomisX a, %xmm15 */
+                *cmp = fn->instr[ip];
+                cmp->arg_t[1] = AP_MREG;
+                cmp->arg[1].mreg = xmm15;
+
+                out_offset_delta++;
+                new_ip += 2;
+                ip++;
+                continue;
+            }
+        }
+        /* note: we probably need to do the same for e.g. subs */
+
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];
         new_ip++;

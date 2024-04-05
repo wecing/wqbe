@@ -85,11 +85,10 @@ uint8_t get_vreg_sz(Type t) {
 #define R11 MREG(R_R11,Q)
 #define XMM0 MREG(R_XMM0,D)
 #define XMM1 MREG(R_XMM1,D)
-#define XMM14 MREG(R_XMM14,D)
+#define XMM15 MREG(R_XMM15,D)
 #define EAX MREG(R_RAX,L)
 #define EDX MREG(R_RDX,L)
 #define ECX MREG(R_RCX,L)
-#define R10D MREG(R_R10,L)
 #define FAKE MREG(R_END,Q)
 
 #define I64(v) AP_I64, .i64=(v)
@@ -841,7 +840,7 @@ static void isel_cled(Instr);
             EMIT2(MOV, Q, I64(0), VREG(dst)); \
         dst.size = X64_SZ_B; \
         if (A_##xop == A_SETE || A_##xop == A_SETNE) \
-            EMIT2(MOV, Q, I64(0), MREG(R_R10,Q)); \
+            EMIT2(MOV, Q, I64(0), MREG(R_R11,Q)); \
         if (isel_c##op##s == isel_clts || isel_c##op##s == isel_cles || \
             isel_c##op##s == isel_cltd || isel_c##op##s == isel_cled) { \
             EMIT2(UCOMIS, xs, ARG(x.t, x.a), ARG(y.t, y.a)); \
@@ -850,11 +849,11 @@ static void isel_cled(Instr);
         } \
         EMIT1(xop, NONE, VREG(dst)); \
         if (A_##xop == A_SETE) { \
-            EMIT1(SETNP, NONE, MREG(R_R10,B)); \
-            EMIT2(AND, B, MREG(R_R10,B), VREG(dst)); \
+            EMIT1(SETNP, NONE, MREG(R_R11,B)); \
+            EMIT2(AND, B, MREG(R_R11,B), VREG(dst)); \
         } else if (A_##xop == A_SETNE) { \
-            EMIT1(SETP, NONE, MREG(R_R10,B)); \
-            EMIT2(OR, B, MREG(R_R10,B), VREG(dst)); \
+            EMIT1(SETP, NONE, MREG(R_R11,B)); \
+            EMIT2(OR, B, MREG(R_R11,B), VREG(dst)); \
         } \
     }
 #define cmp_sse(op,xop) \
