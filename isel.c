@@ -1176,10 +1176,16 @@ static void isel_call(Instr instr) {
             }
         }
     } else if (instr.ret_t.t != TP_NONE) {
-        if (instr.ret_t.t == TP_S || instr.ret_t.t == TP_D)
-            EMIT2(MOVS, D, XMM0, VREG(ret));
-        else
-            EMIT2(MOV, Q, RAX, VREG(ret));
+        switch (instr.ret_t.t) {
+        case TP_W: EMIT2(MOV, L, MREG(R_RAX, L), VREG(ret)); break;
+        case TP_L: EMIT2(MOV, Q, MREG(R_RAX, Q), VREG(ret)); break;
+        case TP_S: EMIT2(MOVS, S, MREG(R_XMM0, S), VREG(ret)); break;
+        case TP_D: EMIT2(MOVS, D, MREG(R_XMM0, D), VREG(ret)); break;
+        default:
+            /* note: QBE allows SUBWTY in arg/ret of call, but doesn't have
+               any test for it, and it doesn't seem widely used */
+            fail("unsupported call return type: %d", instr.ret_t.t);
+        }
     }
 
     if (stk_arg_sz > asm_func.stk_arg_sz)
