@@ -788,6 +788,19 @@ load_mem_bhw(loadub, MOVZB, Q, MOVZB, L)
             EMIT2(MOV, Q, ARG(p.t, p.a), RAX); \
             EMIT2(MOV, Q, ARG(v.t, v.a), MREG_OFF(R_RAX, 0)); \
         } else { \
+            if (X64_SZ_##xs == X64_SZ_B) { \
+                if (v.t == AP_MREG) { \
+                    v.a.mreg.size = X64_SZ_B; \
+                } else if (v.t == AP_VREG) { \
+                    v.a.vreg.size = X64_SZ_B; \
+                } \
+            } else if (X64_SZ_##xs == X64_SZ_W) { \
+                if (v.t == AP_MREG) { \
+                    v.a.mreg.size = X64_SZ_W; \
+                } else if (v.t == AP_VREG) { \
+                    v.a.vreg.size = X64_SZ_W; \
+                } \
+            } \
             EMIT2(mv, xs, ARG(v.t, v.a), MREG(tmp, xs)); \
             EMIT2(MOV, Q, ARG(p.t, p.a), RAX); \
             EMIT2(mv, xs, MREG(tmp, xs), MREG_OFF(R_RAX, 0)); \
