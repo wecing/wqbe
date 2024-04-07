@@ -1178,7 +1178,8 @@ static uint32_t prep_call_args(
 
     for (i = 0; instr.u.call.args[i].t.t != TP_UNKNOWN; ++i) {
         uint8_t arg_vreg_sz =
-            i == 0 && instr.u.call.args[i].t.t == TP_NONE
+            (i == 0 && instr.u.call.args[i].t.t == TP_NONE)
+                || instr.u.call.args[i].t.t == TP_AG
             ? X64_SZ_Q
             : get_vreg_sz(instr.u.call.args[i].t);
         /* note: %rax might be alive */
