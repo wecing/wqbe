@@ -690,6 +690,51 @@ int_div_rem(udiv,DIV,R_RAX)
 int_div_rem(rem,IDIV,R_RDX)
 int_div_rem(urem,DIV,R_RDX)
 
+#define shift_wl(op,xop) \
+    static void isel_##op(Instr instr) { \
+        uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
+        VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
+        VisitValueResult x = visit_value(instr.u.args[0], vreg_sz); \
+        VisitValueResult y = visit_value(instr.u.args[1], X64_SZ_L); \
+        /* sar/shl/shr %cl, r/m */ \
+        if (instr.ret_t.t == TP_W) { \
+            EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
+            EMIT2(MOV, B, ARG(y.t, y.a), MREG(R_RCX, B)); \
+            EMIT2(xop, L, MREG(R_RCX, B), VREG(dst)); \
+        } else if (instr.ret_t.t == TP_L) { \
+            EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
+            EMIT2(MOV, B, ARG(y.t, y.a), MREG(R_RCX, B)); \
+            EMIT2(xop, Q, MREG(R_RCX, B), VREG(dst)); \
+        } else { \
+            fail("unexpected return type"); \
+        } \
+    }
+
+shift_wl(sar, SAR)
+shift_wl(shl, SHL)
+shift_wl(shr, SHR)
+
+static void isel_neg(Instr instr) {
+    uint8_t vreg_sz = get_vreg_sz(instr.ret_t);
+    VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz);
+    VisitValueResult vvr = visit_value(instr.u.args[0], vreg_sz);
+    if (instr.ret_t.t == TP_W) {
+        EMIT2(MOV, L, ARG(vvr.t, vvr.a), VREG(dst));
+        EMIT1(NEG, L, VREG(dst));
+    } else if (instr.ret_t.t == TP_L) {
+        EMIT2(MOV, Q, ARG(vvr.t, vvr.a), VREG(dst));
+        EMIT1(NEG, Q, VREG(dst));
+    } else if (instr.ret_t.t == TP_S) {
+        EMIT2(MOVS, S, ARG(vvr.t, vvr.a), VREG(dst));
+        EMIT2(XOR, L, I64(1L << 31), VREG(dst));
+    } else if (instr.ret_t.t == TP_D) {
+        EMIT2(MOVS, D, ARG(vvr.t, vvr.a), VREG(dst));
+        EMIT2(XOR, Q, I64(1L << 63), VREG(dst));
+    } else {
+        fail("unexpected return type");
+    }
+}
+
 #define isel_alloc16 isel_alloc
 #define isel_alloc4  isel_alloc
 #define isel_alloc8  isel_alloc
@@ -1565,14 +1610,14 @@ static void isel(Instr instr) {
     case I_LOADUW: isel_loaduw(instr); return;
     case I_LOADW: isel_loadw(instr); return;
     case I_MUL: isel_mul(instr); return;
-    // TODO: neg
+    case I_NEG: isel_neg(instr); return;
     case I_OR: isel_or(instr); return;
     case I_PHI: isel_phi(instr); return;
     case I_REM: isel_rem(instr); return;
     case I_RET: isel_ret(instr); return;
-    // TODO: sar
-    // TODO: shl
-    // TODO: shr
+    case I_SAR: isel_sar(instr); return;
+    case I_SHL: isel_shl(instr); return;
+    case I_SHR: isel_shr(instr); return;
     case I_SLTOF: isel_sltof(instr); return;
     case I_STOREB: isel_storeb(instr); return;
     case I_STORED: isel_stored(instr); return;
