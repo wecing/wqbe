@@ -656,6 +656,14 @@ static void fix_asm_func(const AsmFunc *fn) {
         }
         /* note: we probably need to do the same for e.g. subs */
 
+        /* TODO: imul r/m, r */
+        /* TODO: cvtss2si xmm/m, r */
+        /* TODO: cvtsd2si xmm/m, r */
+        /* TODO: cvttss2si xmm/m, r */
+        /* TODO: cvttsd2si xmm/m, r */
+        /* TODO: cvtsi2ss r/m, xmm */
+        /* TODO: cvtsi2sd r/m, xmm */
+
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];
         new_ip++;
