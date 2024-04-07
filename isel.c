@@ -497,10 +497,13 @@ static void emit_prologue(void) {
             } else {
                 check(cr.fst == P_INTEGER || cr.fst == P_SSE,
                       "unexpected classify() result");
-                if (cr.fst == P_INTEGER)
+                if (cr.fst == P_INTEGER) {
+                    vreg.size = X64_SZ_Q;
                     EMIT2(MOV, Q, PREV_STK_ARG(prev_stk_arg_size), VREG(vreg));
-                else
+                } else {
+                    vreg.size = X64_SZ_D;
                     EMIT2(MOVS, D, PREV_STK_ARG(prev_stk_arg_size), VREG(vreg));
+                }
                 prev_stk_arg_size = (prev_stk_arg_size + tp_sz + 7) & ~7;
             }
         }
