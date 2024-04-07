@@ -1264,34 +1264,40 @@ static void isel_ret(Instr instr) {
             switch (ctx.fd.ret_t.t) {
 #define SRC ARG(vvr.t, vvr.a)
             case TP_W:
-                vvr.a.vreg.size = X64_SZ_L;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_L;
                 EMIT2(MOV, L, SRC, MREG(R_RAX, L));
                 used_int_regs++;
                 break;
             case TP_L:
-                vvr.a.vreg.size = X64_SZ_Q;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_Q;
                 EMIT2(MOV, Q, SRC, RAX);
                 used_int_regs++;
                 break;
             case TP_S:
-                vvr.a.vreg.size = X64_SZ_S;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_S;
                 EMIT2(MOVS, S, SRC, XMM0);
                 used_sse_regs++;
                 break;
             case TP_D:
-                vvr.a.vreg.size = X64_SZ_D;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_D;
                 EMIT2(MOVS, D, SRC, XMM0);
                 used_sse_regs++;
                 break;
             case TP_SB:
             case TP_UB:
-                vvr.a.vreg.size = X64_SZ_B;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_B;
                 EMIT2(MOV, B, SRC, MREG(R_RAX, B));
                 used_int_regs++;
                 break;
             case TP_SH:
             case TP_UH:
-                vvr.a.vreg.size = X64_SZ_W;
+                if (vvr.t == AP_VREG)
+                    vvr.a.vreg.size = X64_SZ_W;
                 EMIT2(MOV, W, SRC, MREG(R_RAX, W));
                 used_int_regs++;
                 break;
