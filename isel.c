@@ -1408,6 +1408,101 @@ static void isel_call(Instr instr) {
         asm_func.stk_arg_sz = stk_arg_sz;
 }
 
+static void isel_vastart(Instr instr) {
+    /* note: cannot use %r11 */
+    VisitValueResult p = visit_value(instr.u.args[0], X64_SZ_Q);
+    EMIT2(MOV, Q, ARG(p.t, p.a), R10);
+
+    EMIT2(MOV, L, I64(ctx.gp_offset), MREG_OFF(R_R10, 0));
+    EMIT2(MOV, L, I64(ctx.fp_offset), MREG_OFF(R_R10, 4));
+    EMIT2(LEA, Q, PREV_STK_ARG(ctx.overflow_arg_area), MREG_OFF(R_R10, 8));
+    EMIT2(LEA, Q, ALLOC(ctx.reg_save_area), MREG_OFF(R_R10, 16));
+}
+
+static void isel_vaarg(Instr instr) {
+    static uint32_t buf_suffix = 0;
+    char buf[100];
+    Ident else_label, end_label;
+
+    VReg r = find_or_alloc_tmp(instr.ident, get_vreg_sz(instr.ret_t));
+    VisitValueResult vvr = visit_value(instr.u.args[0], X64_SZ_Q);
+    EMIT2(MOV, Q, ARG(vvr.t, vvr.a), R10);
+
+    w_snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
+    else_label = Ident_from_str(buf);
+    w_snprintf(buf, sizeof(buf), "@wqbe_vaarg_%u", buf_suffix++);
+    end_label = Ident_from_str(buf);
+
+#define GP_OFFSET         MREG_OFF(R_R10,  0)
+#define FP_OFFSET         MREG_OFF(R_R10,  4)
+#define OVERFLOW_ARG_AREA MREG_OFF(R_R10,  8)
+#define REG_SAVE_AREA     MREG_OFF(R_R10, 16)
+    if (instr.ret_t.t == TP_S || instr.ret_t.t == TP_D) {
+        EMIT2(CMP, L, I64(6 * 8 + 8 * 16), FP_OFFSET);
+        EMIT1(JL, NONE, SYM(else_label));
+
+        /* if fp_offset >= 6 * 8 + 8 * 16:
+              *r = *overflow_arg_area;
+              overflow_arg_area += 8; */
+        EMIT2(MOV, Q, OVERFLOW_ARG_AREA, R11);
+        if (instr.ret_t.t == TP_S)
+            EMIT2(MOVS, S, MREG_OFF(R_R11, 0), VREG(r));
+        else
+            EMIT2(MOVS, D, MREG_OFF(R_R11, 0), VREG(r));
+        EMIT2(ADD, Q, I64(8), OVERFLOW_ARG_AREA);
+        EMIT1(JMP, NONE, SYM(end_label));
+
+        /* else:
+               *r = *(reg_save_area + fp_offset)
+               fp_offset += 16; */
+        emit_label(else_label);
+        EMIT2(MOV, L, FP_OFFSET, R11D);
+        EMIT2(ADD, Q, REG_SAVE_AREA, R11);
+        if (instr.ret_t.t == TP_S)
+            EMIT2(MOVS, S, MREG_OFF(R_R11, 0), VREG(r));
+        else
+            EMIT2(MOVS, D, MREG_OFF(R_R11, 0), VREG(r));
+        EMIT2(ADD, L, I64(16), FP_OFFSET);
+
+        emit_label(end_label);
+    } else {
+        check(instr.ret_t.t == TP_W || instr.ret_t.t == TP_L,
+              "vaarg only supports wlsd");
+
+        EMIT2(CMP, L, I64(6 * 8), GP_OFFSET);
+        EMIT1(JL, NONE, SYM(else_label));
+
+        /* if gp_offset >= 6 * 8:
+               *r = *overflow_arg_area;
+               overflow_arg_area += 8; */
+        EMIT2(MOV, Q, OVERFLOW_ARG_AREA, R11);
+        if (instr.ret_t.t == TP_W)
+            EMIT2(MOV, L, MREG_OFF(R_R11, 0), VREG(r));
+        else
+            EMIT2(MOV, Q, MREG_OFF(R_R11, 0), VREG(r));
+        EMIT2(ADD, Q, I64(8), OVERFLOW_ARG_AREA);
+        EMIT1(JMP, NONE, SYM(end_label));
+
+        /* else:
+               *r = *(reg_save_area + gp_offset)
+               gp_offset += 8; */
+        emit_label(else_label);
+        EMIT2(MOV, L, GP_OFFSET, R11D);
+        EMIT2(ADD, Q, REG_SAVE_AREA, R11);
+        if (instr.ret_t.t == TP_W)
+            EMIT2(MOV, L, MREG_OFF(R_R11, 0), VREG(r));
+        else
+            EMIT2(MOV, Q, MREG_OFF(R_R11, 0), VREG(r));
+        EMIT2(ADD, L, I64(8), GP_OFFSET);
+
+        emit_label(end_label);
+    }
+#undef REG_SAVE_AREA
+#undef OVERFLOW_ARG_AREA
+#undef FP_OFFSET
+#undef GP_OFFSET
+}
+
 static void isel_phi(Instr instr) {
     (void)instr;
     fail("unexpected phi op");
@@ -1539,104 +1634,10 @@ static void isel_dbgloc(Instr instr) {
 
 static void isel(Instr instr) {
     switch (instr.t) {
-    case I_ADD: isel_add(instr); return;
-    case I_ALLOC16: isel_alloc16(instr); return;
-    case I_ALLOC4: isel_alloc4(instr); return;
-    case I_ALLOC8: isel_alloc8(instr); return;
-    case I_AND: isel_and(instr); return;
-    case I_BLIT: isel_blit(instr); return;
-    case I_CALL: isel_call(instr); return;
-    case I_CAST: isel_cast(instr); return;
-    case I_CEQD: isel_ceqd(instr); return;
-    case I_CEQL: isel_ceql(instr); return;
-    case I_CEQS: isel_ceqs(instr); return;
-    case I_CEQW: isel_ceqw(instr); return;
-    case I_CGED: isel_cged(instr); return;
-    case I_CGES: isel_cges(instr); return;
-    case I_CGTD: isel_cgtd(instr); return;
-    case I_CGTS: isel_cgts(instr); return;
-    case I_CLED: isel_cled(instr); return;
-    case I_CLES: isel_cles(instr); return;
-    case I_CLTD: isel_cltd(instr); return;
-    case I_CLTS: isel_clts(instr); return;
-    case I_CNED: isel_cned(instr); return;
-    case I_CNEL: isel_cnel(instr); return;
-    case I_CNES: isel_cnes(instr); return;
-    case I_CNEW: isel_cnew(instr); return;
-    case I_COD: isel_cod(instr); return;
-    case I_COPY: isel_copy(instr); return;
-    case I_COS: isel_cos(instr); return;
-    case I_CSGEL: isel_csgel(instr); return;
-    case I_CSGEW: isel_csgew(instr); return;
-    case I_CSGTL: isel_csgtl(instr); return;
-    case I_CSGTW: isel_csgtw(instr); return;
-    case I_CSLEL: isel_cslel(instr); return;
-    case I_CSLEW: isel_cslew(instr); return;
-    case I_CSLTL: isel_csltl(instr); return;
-    case I_CSLTW: isel_csltw(instr); return;
-    case I_CUGEL: isel_cugel(instr); return;
-    case I_CUGEW: isel_cugew(instr); return;
-    case I_CUGTL: isel_cugtl(instr); return;
-    case I_CUGTW: isel_cugtw(instr); return;
-    case I_CULEL: isel_culel(instr); return;
-    case I_CULEW: isel_culew(instr); return;
-    case I_CULTL: isel_cultl(instr); return;
-    case I_CULTW: isel_cultw(instr); return;
-    case I_CUOD: isel_cuod(instr); return;
-    case I_CUOS: isel_cuos(instr); return;
-    case I_DBGLOC: isel_dbgloc(instr); return;
-    case I_DIV: isel_div(instr); return;
-    case I_DTOSI: isel_dtosi(instr); return;
-    case I_DTOUI: isel_dtoui(instr); return;
-    case I_EXTS: isel_exts(instr); return;
-    case I_EXTSW: isel_extsw(instr); return;
-    case I_EXTUW: isel_extuw(instr); return;
-    case I_EXTSB: isel_extsb(instr); return;
-    case I_EXTSH: isel_extsh(instr); return;
-    case I_EXTUB: isel_extub(instr); return;
-    case I_EXTUH: isel_extuh(instr); return;
-    case I_HLT: isel_hlt(instr); return;
-    case I_JMP: isel_jmp(instr); return;
-    case I_JNZ: isel_jnz(instr); return;
-    case I_LOAD: isel_load(instr); return;
-    case I_LOADD: isel_loadd(instr); return;
-    case I_LOADL: isel_loadl(instr); return;
-    case I_LOADS: isel_loads(instr); return;
-    case I_LOADSB: isel_loadsb(instr); return;
-    case I_LOADSH: isel_loadsh(instr); return;
-    case I_LOADSW: isel_loadsw(instr); return;
-    case I_LOADUB: isel_loadub(instr); return;
-    case I_LOADUH: isel_loaduh(instr); return;
-    case I_LOADUW: isel_loaduw(instr); return;
-    case I_LOADW: isel_loadw(instr); return;
-    case I_MUL: isel_mul(instr); return;
-    case I_NEG: isel_neg(instr); return;
-    case I_OR: isel_or(instr); return;
-    case I_PHI: isel_phi(instr); return;
-    case I_REM: isel_rem(instr); return;
-    case I_RET: isel_ret(instr); return;
-    case I_SAR: isel_sar(instr); return;
-    case I_SHL: isel_shl(instr); return;
-    case I_SHR: isel_shr(instr); return;
-    case I_SLTOF: isel_sltof(instr); return;
-    case I_STOREB: isel_storeb(instr); return;
-    case I_STORED: isel_stored(instr); return;
-    case I_STOREH: isel_storeh(instr); return;
-    case I_STOREL: isel_storel(instr); return;
-    case I_STORES: isel_stores(instr); return;
-    case I_STOREW: isel_storew(instr); return;
-    case I_STOSI: isel_stosi(instr); return;
-    case I_STOUI: isel_stoui(instr); return;
-    case I_SUB: isel_sub(instr); return;
-    case I_SWTOF: isel_swtof(instr); return;
-    case I_TRUNCD: isel_truncd(instr); return;
-    case I_UDIV: isel_udiv(instr); return;
-    case I_ULTOF: isel_ultof(instr); return;
-    case I_UREM: isel_urem(instr); return;
-    case I_UWTOF: isel_uwtof(instr); return;
-    // TODO: vaarg
-    // TODO: vastart
-    case I_XOR: isel_xor(instr); return;
+#define I(up,low) \
+    case I_##up: isel_##low(instr); return;
+#include "instr.inc"
+#undef I
     }
     fail("unrecognized instr type %d", instr.t);
 }
