@@ -586,24 +586,55 @@ visit_value_avoid_imm32(VisitValueResult v, uint8_t vreg_sz) {
     return v;
 }
 
+/* QBE has test cases like this:
+
+       %a =w add %pf1, %a
+
+   in practice we should always run SSA construction algorithm before reaching
+   here, so that pattern is impossible. but, QBE has that test case, and we want
+   to make our impl correct even without SSA construction, so we need to be
+   careful not to overwrite output too early in mid-computation.
+
+   that is to say, we cannot emit assembly like:
+
+       movq left, out
+       addq right, out
+
+   instead, we do:
+
+       movq left, %r11
+       addq right, %r11
+       movq %r11, out
+
+   (that pattern is required for IMUL anyways, since it cannot output to mem.)
+*/
+
+// TODO: in arith_wl(sd), use a tmp value to replace R11/XMM15
 #define arith_wlsd(op,ixop,fxop) \
     static void isel_##op(Instr instr) { \
         uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
         VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
         VisitValueResult x = visit_value(instr.u.args[0], vreg_sz); \
-        VisitValueResult y = visit_value(instr.u.args[1], vreg_sz); \
         if (instr.ret_t.t == TP_W) { \
-            EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(ixop, L, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOV, L, ARG(x.t, x.a), R11D); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(ixop, L, ARG(x.t, x.a), R11D); \
+            EMIT2(MOV, L, R11D, VREG(dst)); \
         } else if (instr.ret_t.t == TP_L) { \
-            EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(ixop, Q, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOV, Q, ARG(x.t, x.a), R11); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(ixop, Q, ARG(x.t, x.a), R11); \
+            EMIT2(MOV, Q, R11, VREG(dst)); \
         } else if (instr.ret_t.t == TP_S) { \
-            EMIT2(MOVS, S, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(fxop, S, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOVS, S, ARG(x.t, x.a), XMM15); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(fxop, S, ARG(x.t, x.a), XMM15); \
+            EMIT2(MOVS, S, XMM15, VREG(dst)); \
         } else if (instr.ret_t.t == TP_D) { \
-            EMIT2(MOVS, D, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(fxop, D, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOVS, D, ARG(x.t, x.a), XMM15); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(fxop, D, ARG(x.t, x.a), XMM15); \
+            EMIT2(MOVS, D, XMM15, VREG(dst)); \
         } else { \
             fail("unexpected return type"); \
         } \
@@ -614,13 +645,16 @@ visit_value_avoid_imm32(VisitValueResult v, uint8_t vreg_sz) {
         uint8_t vreg_sz = get_vreg_sz(instr.ret_t); \
         VReg dst = find_or_alloc_tmp(instr.ident, vreg_sz); \
         VisitValueResult x = visit_value(instr.u.args[0], vreg_sz); \
-        VisitValueResult y = visit_value(instr.u.args[1], vreg_sz); \
         if (instr.ret_t.t == TP_W) { \
-            EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(xop, L, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOV, L, ARG(x.t, x.a), R11D); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(xop, L, ARG(x.t, x.a), R11D); \
+            EMIT2(MOV, L, R11D, VREG(dst)); \
         } else if (instr.ret_t.t == TP_L) { \
-            EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(xop, Q, ARG(y.t, y.a), VREG(dst)); \
+            EMIT2(MOV, Q, ARG(x.t, x.a), R11); \
+            x = visit_value(instr.u.args[1], vreg_sz); \
+            EMIT2(xop, Q, ARG(x.t, x.a), R11); \
+            EMIT2(MOV, Q, R11, VREG(dst)); \
         } else { \
             fail("unexpected return type"); \
         } \
