@@ -754,6 +754,68 @@ static void fix_asm_func(const AsmFunc *fn) {
             }
         }
 
+        /* movsl, movsw, movsb, movzw, movzb mem-mem rewrite is different */
+        if (fn->instr[ip].t == A_MOVSL
+            || fn->instr[ip].t == A_MOVSW || fn->instr[ip].t == A_MOVSB
+            || fn->instr[ip].t == A_MOVZW || fn->instr[ip].t == A_MOVZB) {
+            if (fn->instr[ip].arg_t[0] == AP_ALLOC
+                && fn->instr[ip].arg_t[1] == AP_ALLOC) {
+                AsmInstr *op = &out->instr[new_ip];
+                AsmInstr *mov = &out->instr[new_ip+1];
+                struct MReg r11 = {0};
+
+                assert(new_ip+2 < countof(out->instr));
+                r11.size = fn->instr[ip].size;
+                r11.mreg = R_R11;
+
+                /* mov{s,z}XY m1, m2 => mov{s,z}XY m1, %r11 */
+                *op = fn->instr[ip];
+                op->arg_t[1] = AP_MREG;
+                op->arg[1].mreg = r11;
+
+                /* mov{s,z}XY m1, m2 => movY %r11, m2 */
+                *mov = fn->instr[ip];
+                mov->t = A_MOV;
+                mov->arg_t[0] = AP_MREG;
+                mov->arg[0].mreg = r11;
+
+                out_offset_delta += 1;
+                new_ip += 2;
+                ip++;
+                continue;
+            }
+        }
+
+        if (fn->instr[ip].t == A_CVTSS2S) {
+            /* cvtss2sd xmm/m, xmm */
+            if (fn->instr[ip].arg_t[1] == AP_ALLOC) {
+                AsmInstr *op = &out->instr[new_ip];
+                AsmInstr *mov = &out->instr[new_ip+1];
+                struct MReg xmm15 = {0};
+
+                assert(new_ip+2 < countof(out->instr));
+                xmm15.size = fn->instr[ip].size;
+                xmm15.mreg = R_XMM15;
+
+                /* cvtss2sd a, m => cvtss2sd a, %xmm15 */
+                *op = fn->instr[ip];
+                op->arg_t[1] = AP_MREG;
+                op->arg[1].mreg = xmm15;
+
+                /* cvtss2sd a, m => movsd %xmm15, m */
+                *mov = fn->instr[ip];
+                mov->t = A_MOVS;
+                mov->arg_t[0] = AP_MREG;
+                mov->arg[0].mreg = xmm15;
+
+                out_offset_delta += 1;
+                new_ip += 2;
+                ip++;
+                continue;
+
+            }
+        }
+
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];
         new_ip++;
