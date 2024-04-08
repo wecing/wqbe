@@ -626,6 +626,7 @@ static void fix_asm_func(const AsmFunc *fn) {
             if (fn->instr[ip].arg_t[1] == AP_I64
                 || fn->instr[ip].arg_t[1] == AP_F32
                 || fn->instr[ip].arg_t[1] == AP_F64
+                || fn->instr[ip].arg_t[1] == AP_ALLOC
                 || (fn->instr[ip].arg_t[1] == AP_MREG
                     && fn->instr[ip].arg[1].mreg.is_deref)) {
                 AsmInstr *mov = &out->instr[new_ip];
@@ -655,19 +656,18 @@ static void fix_asm_func(const AsmFunc *fn) {
                 continue;
             }
         }
-        /* note: we probably need to do the same for e.g. subs */
 
         if (fn->instr[ip].t == A_IMUL
-            || fn->instr[ip].t == A_CVTTSS2SI
-            || fn->instr[ip].t == A_CVTTSD2SI
-            || fn->instr[ip].t == A_CVTSI2SS
-            || fn->instr[ip].t == A_CVTSI2SD) {
+            || fn->instr[ip].t == A_ADDS || fn->instr[ip].t == A_SUBS
+            || fn->instr[ip].t == A_MULS || fn->instr[ip].t == A_DIVS) {
             /* imul r/m, r */
-            /* cvttss2si xmm/m, r */
-            /* cvttsd2si xmm/m, r */
-            /* cvtsi2ss r/m, xmm */
-            /* cvtsi2sd r/m, xmm */
-            if (fn->instr[ip].arg_t[1] == AP_ALLOC
+            /* subs xmm/m64, xmm */
+            /* QBE allows representing f32/f64 literals as u64 blob;
+               ra_naive converts i64/f32/f64 to mem */
+            if (fn->instr[ip].arg_t[1] == AP_I64
+                || fn->instr[ip].arg_t[1] == AP_F32
+                || fn->instr[ip].arg_t[1] == AP_F64
+                || fn->instr[ip].arg_t[1] == AP_ALLOC
                 || (fn->instr[ip].arg_t[1] == AP_MREG
                     && fn->instr[ip].arg[1].mreg.is_deref)) {
                 AsmInstr *mov = &out->instr[new_ip];
@@ -676,6 +676,54 @@ static void fix_asm_func(const AsmFunc *fn) {
                 struct MReg reg = {0};
 
                 assert(new_ip+3 < countof(out->instr));
+                reg.size = fn->instr[ip].size;
+                reg.mreg = reg.size == X64_SZ_S || reg.size == X64_SZ_D
+                    ? R_XMM15 : R_R11;
+
+                /* imulX a, m => movX m, %r11 */
+                /* subsX a, m => movsX m, %xmm15*/
+                *mov = fn->instr[ip];
+                mov->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov->arg_t[0] = mov->arg_t[1];
+                mov->arg[0] = mov->arg[1];
+                mov->arg_t[1] = AP_MREG;
+                mov->arg[1].mreg = reg;
+
+                /* imulX a, m => imulX m, %r11 */
+                /* subsX a, m => subsX a, %xmm15*/
+                *op = fn->instr[ip];
+                op->arg_t[1] = AP_MREG;
+                op->arg[1].mreg = reg;
+
+                /* imulX a, m => movX %r11, m */
+                /* subsX a, m => movsX %xmm15, m */
+                *mov2 = fn->instr[ip];
+                mov2->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov2->size = reg.size;
+                mov2->arg_t[0] = AP_MREG;
+                mov2->arg[0].mreg = reg;
+
+                out_offset_delta += 2;
+                new_ip += 3;
+                ip++;
+                continue;
+            }
+        }
+
+        if (fn->instr[ip].t == A_CVTTSS2SI || fn->instr[ip].t == A_CVTTSD2SI
+            || fn->instr[ip].t == A_CVTSI2SS || fn->instr[ip].t == A_CVTSI2SD) {
+            /* cvttss2si xmm/m, r */
+            /* cvttsd2si xmm/m, r */
+            /* cvtsi2ss r/m, xmm */
+            /* cvtsi2sd r/m, xmm */
+            if (fn->instr[ip].arg_t[1] == AP_ALLOC
+                || (fn->instr[ip].arg_t[1] == AP_MREG
+                    && fn->instr[ip].arg[1].mreg.is_deref)) {
+                AsmInstr *op = &out->instr[new_ip];
+                AsmInstr *mov = &out->instr[new_ip+1];
+                struct MReg reg = {0};
+
+                assert(new_ip+2 < countof(out->instr));
                 reg.size =
                     fn->instr[ip].t == A_CVTSI2SS
                     ? X64_SZ_S
@@ -685,31 +733,22 @@ static void fix_asm_func(const AsmFunc *fn) {
                 reg.mreg = reg.size == X64_SZ_S || reg.size == X64_SZ_D
                     ? R_XMM15 : R_R11;
 
-                /* imulX a, m => movX m, %r11 */
-                /* cvtsi2sd a, m => movsX m, %xmm15*/
-                *mov = fn->instr[ip];
-                mov->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
-                mov->arg_t[0] = mov->arg_t[1];
-                mov->arg[0] = mov->arg[1];
-                mov->arg_t[1] = AP_MREG;
-                mov->arg[1].mreg = reg;
-
-                /* imulX a, m => imulX m, %r11 */
-                /* cvtsi2sd a, m => cvtsi2sdX a, %xmm15*/
+                /* cvttss2siX a, m => cvttss2siX a, %r11 */
+                /* cvtsi2sdX a, m => cvtsi2sdX a, %xmm15*/
                 *op = fn->instr[ip];
                 op->arg_t[1] = AP_MREG;
                 op->arg[1].mreg = reg;
 
-                /* imulX a, m => movX %r11, m */
-                /* cvtsi2sd a, m => movsX %xmm15, m */
-                *mov2 = fn->instr[ip];
-                mov2->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
-                mov2->size = reg.size;
-                mov2->arg_t[0] = AP_MREG;
-                mov2->arg[0].mreg = reg;
+                /* cvttss2siX a, m => movX %r11, m */
+                /* cvtsi2sdX a, m => movsX %xmm15, m */
+                *mov = fn->instr[ip];
+                mov->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov->size = reg.size;
+                mov->arg_t[0] = AP_MREG;
+                mov->arg[0].mreg = reg;
 
-                out_offset_delta += 2;
-                new_ip += 3;
+                out_offset_delta += 1;
+                new_ip += 2;
                 ip++;
                 continue;
             }
