@@ -531,7 +531,6 @@ uint32_t color_regs(struct InterGraph *graph) {
     /* color regs with greedy algorithm */
     for (i = 0; i < regs_cnt; ++i) {
         int j;
-        // TODO: test removing all {int,sse}_mregs and force hard reg alloc
         static const uint32_t int_mregs[] = {
             /* keep ordered by enum value */
             R_RAX, R_RCX, R_RDX, R_RSI, R_RDI, R_R8, R_R9,
@@ -606,7 +605,7 @@ static void fix_asm_func(const AsmFunc *fn) {
     while (fn->instr[ip].t != A_UNKNOWN) {
         /* adjust all labels before current instr */
         while (!Ident_is_empty(fn->label[label_idx].ident) &&
-               fn->label[label_idx].offset < ip) {
+               fn->label[label_idx].offset <= ip) {
             out->label[label_idx] = fn->label[label_idx];
             out->label[label_idx].offset += out_offset_delta;
             label_idx++;
