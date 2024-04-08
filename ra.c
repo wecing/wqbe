@@ -531,6 +531,7 @@ uint32_t color_regs(struct InterGraph *graph) {
     /* color regs with greedy algorithm */
     for (i = 0; i < regs_cnt; ++i) {
         int j;
+        // TODO: test removing all {int,sse}_mregs and force hard reg alloc
         static const uint32_t int_mregs[] = {
             /* keep ordered by enum value */
             R_RAX, R_RCX, R_RDX, R_RSI, R_RDI, R_R8, R_R9,
@@ -671,10 +672,16 @@ static void fix_asm_func(const AsmFunc *fn) {
                     && fn->instr[ip].arg[1].mreg.is_deref)) {
                 AsmInstr *mov = &out->instr[new_ip];
                 AsmInstr *op = &out->instr[new_ip+1];
+                AsmInstr *mov2 = &out->instr[new_ip+2];
                 struct MReg reg = {0};
 
-                assert(new_ip+2 < countof(out->instr));
-                reg.size = fn->instr[ip].size;
+                assert(new_ip+3 < countof(out->instr));
+                reg.size =
+                    fn->instr[ip].t == A_CVTSI2SS
+                    ? X64_SZ_S
+                    : fn->instr[ip].t == A_CVTSI2SD
+                      ? X64_SZ_D
+                      : fn->instr[ip].size;
                 reg.mreg = reg.size == X64_SZ_S || reg.size == X64_SZ_D
                     ? R_XMM15 : R_R11;
 
@@ -682,6 +689,8 @@ static void fix_asm_func(const AsmFunc *fn) {
                 /* cvtsi2sd a, m => movsX m, %xmm15*/
                 *mov = fn->instr[ip];
                 mov->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov->arg_t[0] = mov->arg_t[1];
+                mov->arg[0] = mov->arg[1];
                 mov->arg_t[1] = AP_MREG;
                 mov->arg[1].mreg = reg;
 
@@ -691,8 +700,16 @@ static void fix_asm_func(const AsmFunc *fn) {
                 op->arg_t[1] = AP_MREG;
                 op->arg[1].mreg = reg;
 
-                out_offset_delta++;
-                new_ip += 2;
+                /* imulX a, m => movX %r11, m */
+                /* cvtsi2sd a, m => movsX %xmm15, m */
+                *mov2 = fn->instr[ip];
+                mov2->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov2->size = reg.size;
+                mov2->arg_t[0] = AP_MREG;
+                mov2->arg[0].mreg = reg;
+
+                out_offset_delta += 2;
+                new_ip += 3;
                 ip++;
                 continue;
             }
