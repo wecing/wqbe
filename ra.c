@@ -656,13 +656,47 @@ static void fix_asm_func(const AsmFunc *fn) {
         }
         /* note: we probably need to do the same for e.g. subs */
 
-        /* TODO: imul r/m, r */
-        /* TODO: cvtss2si xmm/m, r */
-        /* TODO: cvtsd2si xmm/m, r */
-        /* TODO: cvttss2si xmm/m, r */
-        /* TODO: cvttsd2si xmm/m, r */
-        /* TODO: cvtsi2ss r/m, xmm */
-        /* TODO: cvtsi2sd r/m, xmm */
+        if (fn->instr[ip].t == A_IMUL
+            || fn->instr[ip].t == A_CVTTSS2SI
+            || fn->instr[ip].t == A_CVTTSD2SI
+            || fn->instr[ip].t == A_CVTSI2SS
+            || fn->instr[ip].t == A_CVTSI2SD) {
+            /* imul r/m, r */
+            /* cvttss2si xmm/m, r */
+            /* cvttsd2si xmm/m, r */
+            /* cvtsi2ss r/m, xmm */
+            /* cvtsi2sd r/m, xmm */
+            if (fn->instr[ip].arg_t[1] == AP_ALLOC
+                || (fn->instr[ip].arg_t[1] == AP_MREG
+                    && fn->instr[ip].arg[1].mreg.is_deref)) {
+                AsmInstr *mov = &out->instr[new_ip];
+                AsmInstr *op = &out->instr[new_ip+1];
+                struct MReg reg = {0};
+
+                assert(new_ip+2 < countof(out->instr));
+                reg.size = fn->instr[ip].size;
+                reg.mreg = reg.size == X64_SZ_S || reg.size == X64_SZ_D
+                    ? R_XMM15 : R_R11;
+
+                /* imulX a, m => movX m, %r11 */
+                /* cvtsi2sd a, m => movsX m, %xmm15*/
+                *mov = fn->instr[ip];
+                mov->t = reg.mreg == R_R11 ? A_MOV : A_MOVS;
+                mov->arg_t[1] = AP_MREG;
+                mov->arg[1].mreg = reg;
+
+                /* imulX a, m => imulX m, %r11 */
+                /* cvtsi2sd a, m => cvtsi2sdX a, %xmm15*/
+                *op = fn->instr[ip];
+                op->arg_t[1] = AP_MREG;
+                op->arg[1].mreg = reg;
+
+                out_offset_delta++;
+                new_ip += 2;
+                ip++;
+                continue;
+            }
+        }
 
         /* default: simply copy op */
         out->instr[new_ip] = fn->instr[ip];
