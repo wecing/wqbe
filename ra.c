@@ -594,6 +594,13 @@ uint32_t color_regs(struct InterGraph *graph) {
     return max_used_color;
 }
 
+static int mreg_eq(struct MReg m1, struct MReg m2) {
+    return m1.size == m2.size
+        && m1.mreg == m2.mreg
+        && m1.is_deref == m2.is_deref
+        && m1.offset == m2.offset;
+}
+
 /* fix illegal asm instructions and adjust labels as needed. */
 /* NOTE: mem-mem ops are handled in ra_naive.c */
 static void fix_asm_func(const AsmFunc *fn) {
@@ -616,6 +623,29 @@ static void fix_asm_func(const AsmFunc *fn) {
             out_offset_delta--;
             ip++;
             continue;
+        }
+
+        /* avoid mov ops no longer necessary after graph coloring */
+        if (fn->instr[ip].t == A_MOV || fn->instr[ip].t == A_MOVS) {
+            /* non-spilled */
+            if (fn->instr[ip].arg_t[0] == AP_MREG
+                && !fn->instr[ip].arg[0].mreg.is_deref
+                && fn->instr[ip].arg_t[0] == fn->instr[ip].arg_t[1]
+                && mreg_eq(fn->instr[ip].arg[0].mreg,
+                           fn->instr[ip].arg[1].mreg)) {
+                out_offset_delta--;
+                ip++;
+                continue;
+            }
+
+            /* spilled */
+            if (fn->instr[ip].arg_t[0] == AP_ALLOC
+                && fn->instr[ip].arg_t[0] == fn->instr[ip].arg_t[1]
+                && fn->instr[ip].arg[0].offset == fn->instr[ip].arg[1].offset) {
+                out_offset_delta--;
+                ip++;
+                continue;
+            }
         }
 
         if (fn->instr[ip].t == A_UCOMIS) {
