@@ -581,6 +581,9 @@ visit_value_avoid_imm32(VisitValueResult v, uint8_t vreg_sz) {
         r.a.vreg = find_or_alloc_tmp(visit_value_unique_ident(), vreg_sz);
         EMIT2(MOV, NONE, I64(v.a.i64), VREG(r.a.vreg));
         LAST_INSTR.size = vreg_sz;
+        /* fp constant written as i64 literal */
+        if (vreg_sz == X64_SZ_S || vreg_sz == X64_SZ_D)
+            LAST_INSTR.t = A_MOVS;
         return r;
     }
     return v;
@@ -772,7 +775,8 @@ static void isel_neg(Instr instr) {
     } else if (instr.ret_t.t == TP_S) {
         EMIT2(MOVQ, NONE, ARG(vvr.t, vvr.a), R11);
         EMIT2(XOR, L, I64(1L << 31), R11D);
-        EMIT2(MOV, L, R11D, VREG(dst));
+        EMIT2(MOV, L, R11D, R11D);
+        EMIT2(MOVQ, NONE, R11, VREG(dst));
     } else if (instr.ret_t.t == TP_D) {
         EMIT2(MOVQ, NONE, ARG(vvr.t, vvr.a), R11);
         EMIT2(XOR, Q, I64(1L << 63), R11);
