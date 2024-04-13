@@ -2,6 +2,9 @@
 
 My implementation of [Quentin Carbonneaux's QBE](https://c9x.me/compile/).
 
+wqbe has no optimizations, and only supports OpenBSD and Linux on X86-64.
+It can be used as the backend for Hare and cproc.
+
 ## References
 
 - [QBE Intermediate Language](https://c9x.me/compile/doc/il.html)
