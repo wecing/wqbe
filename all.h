@@ -330,7 +330,7 @@ int w_snprintf(char *, size_t, const char *, ...);
 void dephi(FuncDef *);
 
 /* isel_naive.c */
-void dump_x64(AsmFunc *, Linkage, FILE *);
+void dump_x64(AsmFunc *, Linkage, uint16_t, FILE *);
 void dump_x64_data(DataDef, FILE *);
 AsmFunc *isel_naive_x64(FuncDef *); /* returns borrowed memory */
 

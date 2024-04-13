@@ -38,7 +38,7 @@ static void x64(FuncDef *fd) {
             printf("####################\n");
             printf("### %s after isel_naive_x64()\n", Ident_to_str(fd->ident));
             printf("####################\n\n");
-            dump_x64(af, fd->linkage, stdout);
+            dump_x64(af, fd->linkage, fd->dbgfile_id, stdout);
             printf("\n");
         }
 
@@ -48,14 +48,14 @@ static void x64(FuncDef *fd) {
             printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
             printf("####################\n\n");
         }
-        dump_x64(af, fd->linkage, fout);
+        dump_x64(af, fd->linkage, fd->dbgfile_id, fout);
     } else {
         AsmFunc *af = isel_x64(fd);
         if (dump_debug_info) {
             printf("####################\n");
             printf("### %s after isel_x64()\n", Ident_to_str(fd->ident));
             printf("####################\n\n");
-            dump_x64(af, fd->linkage, stdout);
+            dump_x64(af, fd->linkage, fd->dbgfile_id, stdout);
             printf("\n");
         }
 
@@ -64,7 +64,7 @@ static void x64(FuncDef *fd) {
             printf("####################\n");
             printf("### %s after ra_x64()\n", Ident_to_str(fd->ident));
             printf("####################\n\n");
-            dump_x64(af, fd->linkage, stdout);
+            dump_x64(af, fd->linkage, fd->dbgfile_id, stdout);
             printf("\n");
         }
 
@@ -74,7 +74,7 @@ static void x64(FuncDef *fd) {
             printf("### %s after ra_naive_x64()\n", Ident_to_str(fd->ident));
             printf("####################\n\n");
         }
-        dump_x64(af, fd->linkage, fout);
+        dump_x64(af, fd->linkage, fd->dbgfile_id, fout);
     }
 }
 

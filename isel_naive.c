@@ -238,7 +238,7 @@ static void dump_arg(AsmInstr ai, int i, FILE *f) {
     fail("unknown arg type");
 }
 
-void dump_x64(AsmFunc *fn, Linkage lnk, FILE *f) {
+void dump_x64(AsmFunc *fn, Linkage lnk, uint16_t dbgfile_id, FILE *f) {
     uint32_t i, lb = 0;
     AsmInstr ai;
 
@@ -268,10 +268,10 @@ void dump_x64(AsmFunc *fn, Linkage lnk, FILE *f) {
         if (ai.t == A__AS_LOC) {
             if (ai.arg[1].i64 == -1)
                 fprintf(f, "    .loc %d %" PRId64,
-                        ctx.fd.dbgfile_id, ai.arg[0].i64);
+                        dbgfile_id, ai.arg[0].i64);
             else
                 fprintf(f, "    .loc %d %" PRId64 " %" PRId64,
-                        ctx.fd.dbgfile_id, ai.arg[0].i64, ai.arg[1].i64);
+                        dbgfile_id, ai.arg[0].i64, ai.arg[1].i64);
         } else {
             fprintf(f, "    %s", op_table[ai.t]);
             dump_sz(ai.size, f);
