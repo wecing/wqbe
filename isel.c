@@ -744,11 +744,11 @@ int_div_rem(urem,DIV,R_RDX)
         /* sar/shl/shr %cl, r/m */ \
         if (instr.ret_t.t == TP_W) { \
             EMIT2(MOV, L, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(MOV, B, ARG(y.t, y.a), MREG(R_RCX, B)); \
+            EMIT2(MOV, L, ARG(y.t, y.a), MREG(R_RCX, L)); \
             EMIT2(xop, L, MREG(R_RCX, B), VREG(dst)); \
         } else if (instr.ret_t.t == TP_L) { \
             EMIT2(MOV, Q, ARG(x.t, x.a), VREG(dst)); \
-            EMIT2(MOV, B, ARG(y.t, y.a), MREG(R_RCX, B)); \
+            EMIT2(MOV, L, ARG(y.t, y.a), MREG(R_RCX, L)); \
             EMIT2(xop, Q, MREG(R_RCX, B), VREG(dst)); \
         } else { \
             fail("unexpected return type"); \
