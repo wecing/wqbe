@@ -787,8 +787,8 @@ static void fix_asm_func(const AsmFunc *fn) {
         if (fn->instr[ip].t == A_MOVSL
             || fn->instr[ip].t == A_MOVSW || fn->instr[ip].t == A_MOVSB
             || fn->instr[ip].t == A_MOVZW || fn->instr[ip].t == A_MOVZB) {
-            if (fn->instr[ip].arg_t[0] == AP_ALLOC
-                && fn->instr[ip].arg_t[1] == AP_ALLOC) {
+            /* mov{s,z}XY r/m, r */
+            if (fn->instr[ip].arg_t[1] == AP_ALLOC) {
                 AsmInstr *op = &out->instr[new_ip];
                 AsmInstr *mov = &out->instr[new_ip+1];
                 struct MReg r11 = {0};
