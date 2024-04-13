@@ -1016,6 +1016,7 @@ static void isel_extuw(Instr instr) {
     static void isel_##op(Instr instr) { \
         VReg dst = find_or_alloc_tmp(instr.ident, get_vreg_sz(instr.ret_t)); \
         VisitValueResult v = visit_value(instr.u.args[0], X64_SZ_L); \
+        v = visit_value_avoid_imm32(v, X64_SZ_L); \
         if (v.t == AP_VREG) \
             v.a.vreg.size = X64_SZ_##sz; \
         if (instr.ret_t.t == TP_W) { \
