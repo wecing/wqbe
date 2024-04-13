@@ -186,12 +186,18 @@ static void visit_instr(void) {
     AsmInstr in = IN.instr[I_IP];
 
     /* QBE allows representing f32/f64 literals as u64 blob */
-    if (in.size == SZ_S) {
+    if (in.t == A_CVTSS2S || in.t == A_CVTTSS2SI) {
         if (in.arg_t[0] == AP_I64) in.arg_t[0] = AP_F32;
-        if (in.arg_t[1] == AP_I64) in.arg_t[1] = AP_F32;
-    } else if (in.size == SZ_D) {
+    } else if (in.t == A_CVTSD2S || in.t == A_CVTTSD2SI) {
         if (in.arg_t[0] == AP_I64) in.arg_t[0] = AP_F64;
-        if (in.arg_t[1] == AP_I64) in.arg_t[1] = AP_F64;
+    } else {
+        if (in.size == SZ_S) {
+            if (in.arg_t[0] == AP_I64) in.arg_t[0] = AP_F32;
+            if (in.arg_t[1] == AP_I64) in.arg_t[1] = AP_F32;
+        } else if (in.size == SZ_D) {
+            if (in.arg_t[0] == AP_I64) in.arg_t[0] = AP_F64;
+            if (in.arg_t[1] == AP_I64) in.arg_t[1] = AP_F64;
+        }
     }
 
     visit_arg(&in, 0);
