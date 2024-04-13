@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -162,10 +163,10 @@ static AsmInstr *get_instr_by_label(AsmFunc *fn, Ident ident) {
 }
 
 static void verify_succ_ptr(AsmFunc *fn, AsmInstr *ip) {
-    size_t offset;
+    ptrdiff_t offset;
     if (ip == 0) return;
     offset = ip - fn->instr;
-    check(0 <= offset && offset < (size_t) countof(fn->instr),
+    check(0 <= offset && offset < (ptrdiff_t) countof(fn->instr),
           "invalid succ pointer: out of range");
     check(ip->t != A_UNKNOWN, "invalid succ pointer: not initialized");
 }

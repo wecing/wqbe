@@ -1813,7 +1813,9 @@ static void isel_ret(Instr instr) {
 static void isel_dbgloc(Instr instr) {
     EMIT2(_AS_LOC, NONE,
           I64(instr.u.args[0].u.u64),
-          I64(instr.u.args[1].t == V_CI ? instr.u.args[1].u.u64 : -1));
+          I64(instr.u.args[1].t == V_CI
+              ? instr.u.args[1].u.u64
+              : (uint64_t) -1));
 }
 
 static void isel(Instr instr) {
