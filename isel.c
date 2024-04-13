@@ -999,6 +999,7 @@ static void isel_exts(Instr instr) {
 static void isel_extsw(Instr instr) {
     VReg dst = find_or_alloc_tmp(instr.ident, X64_SZ_Q);
     VisitValueResult v = visit_value(instr.u.args[0], X64_SZ_L);
+    v = visit_value_avoid_imm32(v, X64_SZ_L);
     EMIT2(MOVSL, Q, ARG(v.t, v.a), VREG(dst));
 }
 
