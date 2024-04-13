@@ -20,7 +20,7 @@ static DataDef data_def_pool[4 * 1024]; /* 4 * 40 KB */
 static int next_data_def_id = 1;
 
 #define INSTR_PER_PAGE 1024
-static Instr *instr_pages[64]; /* <= 64 * 64 KB */
+static Instr *instr_pages[128]; /* <= 128 * 64 KB */
 static int next_instr_id = 1;
 static Instr *free_instr_chain = 0; /* singly linked */
 
