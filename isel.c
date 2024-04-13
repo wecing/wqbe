@@ -770,11 +770,13 @@ static void isel_neg(Instr instr) {
         EMIT2(MOV, Q, ARG(vvr.t, vvr.a), VREG(dst));
         EMIT1(NEG, Q, VREG(dst));
     } else if (instr.ret_t.t == TP_S) {
-        EMIT2(MOVS, S, ARG(vvr.t, vvr.a), VREG(dst));
-        EMIT2(XOR, L, I64(1L << 31), VREG(dst));
+        EMIT2(MOVQ, NONE, ARG(vvr.t, vvr.a), R11);
+        EMIT2(XOR, L, I64(1L << 31), R11D);
+        EMIT2(MOV, L, R11D, VREG(dst));
     } else if (instr.ret_t.t == TP_D) {
-        EMIT2(MOVS, D, ARG(vvr.t, vvr.a), VREG(dst));
-        EMIT2(XOR, Q, I64(1L << 63), VREG(dst));
+        EMIT2(MOVQ, NONE, ARG(vvr.t, vvr.a), R11);
+        EMIT2(XOR, Q, I64(1L << 63), R11);
+        EMIT2(MOV, Q, R11, VREG(dst));
     } else {
         fail("unexpected return type");
     }
