@@ -33,6 +33,11 @@
 #define inline
 #endif
 
+/* maybe __unused is only available on OpenBSD. */
+#if defined(__linux__)
+#define __unused __attribute__((__unused__))
+#endif
+
 /* used for NULL */
 #include <stddef.h>
 

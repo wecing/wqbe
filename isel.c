@@ -1416,7 +1416,14 @@ static void isel_call(Instr instr) {
         EMIT1(_DUMMY_DEF, NONE, MREG(call_int_regs[i], Q));
     for (i = 0; i < (int) countof(call_sse_regs); ++i)
         EMIT1(_DUMMY_DEF, NONE, MREG(call_sse_regs[i], D));
+    EMIT1(_DUMMY_USE, NONE, RAX);
     EMIT1(_DUMMY_DEF, NONE, RAX);
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM8, D));
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM9, D));
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM10, D));
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM11, D));
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM12, D));
+    EMIT1(_DUMMY_DEF, NONE, MREG(R_XMM13, D));
 
     /* handle return value */
     if (instr.ret_t.t == TP_AG) {
