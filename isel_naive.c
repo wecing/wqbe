@@ -700,6 +700,9 @@ static void emit_prologue(void) {
     ClassifyResult cr;
 
     emit_label(ctx.fd.ident);
+#ifdef __OpenBSD__
+    EMIT0(ENDBR64, NONE);
+#endif
     EMIT1(PUSH, Q, RBP);
     EMIT2(MOV, Q, RSP, RBP);
     EMIT2(SUB, Q, I64(0), RSP); /* size to be updated later */

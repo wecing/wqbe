@@ -302,8 +302,14 @@ static void visit_instr(void) {
         return;
     }
 
+#ifdef __OpenBSD__
+#define PROLOGUE_LEN 4 /* endbr64 + regular prologue */
+#else
+#define PROLOGUE_LEN 3 /* pushq, movq, subq */
+#endif
+
     /* fix call with dynalloc */
-    if (I_IP > 2 && /* prologue might contain subq $0, %rsp */
+    if (I_IP >= PROLOGUE_LEN && /* prologue might contain subq $0, %rsp */
         (in.t == A_ADD || in.t == A_SUB) &&
         in.arg_t[0] == AP_I64 &&
         in.arg[0].i64 == 0 &&
@@ -332,11 +338,11 @@ AsmFunc *ra_naive_x64(AsmFunc *in_ptr, uint16_t *first_datadef_id_ptr) {
     IN.alloc_sz = (IN.alloc_sz + 15) & ~15;
     IN.stk_arg_sz = (IN.stk_arg_sz + 15) & ~15;
     /* fix sub $0, %rsp in prologue */
-    IN.instr[2].arg[0].i64 = IN.alloc_sz;
+    IN.instr[PROLOGUE_LEN-1].arg[0].i64 = IN.alloc_sz;
     if (!IN.has_dyn_alloc) {
         /* no dyn alloc: pre-allocate ALLOC and STK_ARG
            with dyn alloc: also dyn alloc STK_ARG */
-        IN.instr[2].arg[0].i64 += IN.stk_arg_sz;
+        IN.instr[PROLOGUE_LEN-1].arg[0].i64 += IN.stk_arg_sz;
     }
 
     while (IN.instr[I_IP].t) {

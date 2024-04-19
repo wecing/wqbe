@@ -68,7 +68,7 @@ init() {
 			cc="cc"
 			;;
 		*OpenBSD*)
-			cc="cc -nopie -lpthread -Wl,-z,nobtcfi"
+			cc="cc -nopie -lpthread"
 			;;
 		*FreeBSD*)
 			cc="cc -lpthread"

@@ -144,6 +144,7 @@ static UseDef get_use_def(AsmInstr *ip) {
     case A_RET:
         /* nothing to do -- we rely on dummy USE/DEF marker */
         break;
+    case A_ENDBR64:
     case A_JE: case A_JL: case A_JMP: case A_JNE:
     case A_UD2: case A__AS_LOC:
         break;
